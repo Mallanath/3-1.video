@@ -379,12 +379,24 @@ class Api:
             wins = webview.windows
             if not wins:
                 return None
-            result = wins[0].create_file_dialog(
-                webview.FileDialog.FOLDER, allow_multiple=True
-            )
-        except Exception:
+            try:
+                result = wins[0].create_file_dialog(
+                    webview.FileDialog.FOLDER, allow_multiple=True
+                )
+            except TypeError:
+                # Old pywebview (<6): FOLDER dialog takes no allow_multiple.
+                result = wins[0].create_file_dialog(webview.FileDialog.FOLDER)
+        except Exception as e:
+            try:
+                _dbg("pick_folder dialog FAIL %r" % (e,))
+            except Exception:
+                pass
             return None
         raw = _normalize_dialog_result(result)
+        try:
+            _dbg("pick_folder raw=%r" % ([str(p) for p in raw],))
+        except Exception:
+            pass
         if not raw:
             return None  # user cancelled
         paths = []
@@ -394,7 +406,12 @@ class Api:
             try:
                 if folder.is_dir():
                     picked.append(str(folder))
-                    paths.extend(video_files_in(folder, recursive=True))
+                    found = video_files_in(folder, recursive=True)
+                    try:
+                        _dbg("pick_folder scan %s -> %d videos" % (folder, len(found)))
+                    except Exception:
+                        pass
+                    paths.extend(found)
                 elif folder.is_file() and folder.suffix.lower() in VIDEO_EXTS:
                     paths.append(folder)
             except OSError:

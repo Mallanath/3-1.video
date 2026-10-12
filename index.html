@@ -123,9 +123,9 @@
   <h1>Triple Vertical Player</h1>
   <span class="badge">1 × 3 WALL · synced · F fullscreen · H hide UI · &lt; &gt; seek 5s</span>
   <button id="openFileBtn" title="Pick video file(s) — plays one after another">📂 Open video(s)</button>
-  <button id="openFolderBtn" title="Pick a folder — every video inside (subfolders included) plays continuously. The dialog lists folders, not files: select the folder itself.">📁 Open folder</button>
+  <button id="openFolderBtn" title="Pick a folder — shows the videos inside while picking, then plays them all (subfolders included). Shift+click uses the system folder dialog.">📁 Open folder</button>
   <input id="file" type="file" accept="video/*" multiple hidden />
-  <input id="folderInput" type="file" webkitdirectory hidden />
+  <input id="folderInput" type="file" webkitdirectory multiple hidden />
   <button id="playBtn" class="primary" disabled>▶ Play</button>
   <button id="syncBtn" disabled>⟳ Sync</button>
   <button id="fsBtn" title="Fullscreen 3-up (F)">⛶ Fullscreen (F)</button>
@@ -401,12 +401,18 @@
   }
   // Native Windows dialogs via Python first (reliable, no gesture block),
   // HTML <input> pickers as browser fallback.
-  // NOTE: Windows folder dialogs (FOS_PICKFOLDERS) list folders only — video
-  // files inside are intentionally hidden by Windows. That is normal: pick
-  // the folder and its videos (subfolders included) are queued on the next
-  // step. "Open video(s)" lists files; "Open folder" lists folders.
+  // NOTE: Windows native FOLDER dialogs (FOS_PICKFOLDERS) hide video files
+  // while picking — the folder looks empty even when it is full of videos.
+  // The webkitdirectory picker below SHOWS the files inside, so "Open folder"
+  // prefers it: you SEE the videos, pick the folder, and they queue.
   function announceQueue(urls) {
     if (urls && urls.length > 1) toast(`Queued ${urls.length} videos — advancing automatically. ⏮ ⏭ / N / P to skip.`, 3500);
+  }
+  function supportsDirPick() {
+    try {
+      const t = document.createElement('input');
+      return ('webkitdirectory' in t) || ('webkitdirectory' in folderInput);
+    } catch(e) { return false; }
   }
   async function openFilePicker() {
     const api = appApi();
@@ -420,7 +426,11 @@
     }
     fileInput.click();
   }
-  async function openFolderPicker() {
+  async function openFolderPicker(e) {
+    // Shift+click forces the native dialog (HTTP streaming, best for GB-size
+    // files). Normal click uses the directory picker that SHOWS videos.
+    const wantNative = !!(e && e.shiftKey);
+    if (!wantNative && supportsDirPick()) { try { folderInput.click(); return; } catch(err) {} }
     const api = appApi();
     if (api && api.pick_folder) {
       try {
@@ -430,10 +440,15 @@
           toast(`No videos found in${r.folder ? ' ' + r.folder : ' that folder'} (subfolders included). Best: MP4 / WebM / MOV — or use “Open video(s)” to pick files directly.`, 6000);
           return;
         }
+        // Cancelled native dialog: if we skipped the visible picker (shift),
+        // fall back to it so the user still sees the files.
+        if (wantNative && supportsDirPick()) { try { folderInput.click(); } catch(err) {} }
         return; // cancelled -> stay on black
-      } catch(e) {}
+      } catch(err) {
+        if (supportsDirPick()) { try { folderInput.click(); } catch(err2) {} return; }
+      }
     }
-    if ('webkitdirectory' in folderInput) folderInput.click();
+    if (supportsDirPick()) folderInput.click();
     else { fileInput.click(); toast('Folder pick not supported here — select many files instead.', 4000); }
   }
   openFileBtn.onclick = openFilePicker;
