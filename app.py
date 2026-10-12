@@ -147,12 +147,58 @@ class VideoHandler(BaseHTTPRequestHandler):
         self._send_file(head_only=True)
 
 
+def _dbg(msg):
+    try:
+        with open(
+            r"C:\Users\CEPL\AppData\Local\Temp\opencode\chrome_patch.log",
+            "a",
+            encoding="utf-8",
+        ) as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+
+def _force_dark_chrome(form):
+    """Black title bar + black window border, always (even on light Windows
+    theme). A white OS title bar/border reads as 'white edges' around the
+    player, and pywebview's exit-fullscreen path resets the border to the
+    light default — so re-apply after every toggle too."""
+    try:
+        from webview.platforms import winforms as _wf
+        hwnd = form.Handle.ToInt32()
+        _wf.DwmSetWindowAttribute(hwnd, 20, 1)        # immersive dark title bar
+        _wf.DwmSetWindowAttribute(hwnd, 38, 2)        # dark mode (20H1+)
+        _wf.DwmSetWindowAttribute(hwnd, 34, 0x000000)  # black border, never white
+        _dbg("force_dark_chrome OK hwnd=%s" % hwnd)
+    except Exception as e:
+        _dbg("force_dark_chrome FAIL %r" % e)
+
+
+def _patch_dark_chrome():
+    try:
+        from webview.platforms import winforms as _wf
+        # pywebview 6.x nests the real Form as BrowserView.BrowserForm
+        # (older releases exposed it as BrowserForm directly).
+        view = getattr(_wf, "BrowserView", None)
+        form_cls = getattr(view, "BrowserForm", None) or getattr(_wf, "BrowserForm", None)
+        if form_cls is not None:
+            form_cls.update_title_bar_theme = (
+                lambda self: _force_dark_chrome(self)
+            )
+            _dbg("patch applied to %r" % (form_cls,))
+        else:
+            _dbg("patch FAIL: no form class found")
+    except Exception as e:
+        _dbg("patch FAIL %r" % e)
+
+
 class Api:
     """Called from JS (pywebview runs these on a worker thread).
 
     - get_startup: pure filesystem work, no UI.
-    - toggle_fullscreen: BrowserForm.toggle_fullscreen marshals to the UI
-      thread itself via Control.Invoke.
+    - toggle_fullscreen: public Window.toggle_fullscreen plus a fullscreen
+      gap guard (over-cover + black chrome) marshalled to the UI thread.
     - pick_files / pick_folder: native Windows file dialogs via
       Window.create_file_dialog (reliable, works without a user-gesture
       restriction, so the app can auto-open the chooser on launch).
@@ -175,14 +221,50 @@ class Api:
         wins = webview.windows
         if not wins:
             return False
-        form = getattr(wins[0], "native", None)
-        if form is None:
-            return False
-        form.toggle_fullscreen()  # thread-safe: marshals via Control.Invoke
         try:
-            return bool(form.is_fullscreen)
+            # Public Window API (works across pywebview versions/backends).
+            wins[0].toggle_fullscreen()
         except Exception:
             return False
+        try:
+            form = getattr(wins[0], "native", None)
+            if form is None:
+                return False
+            on = bool(getattr(form, "is_fullscreen", False))
+        except Exception:
+            return False
+        # Fullscreen gap guard: over-cover the monitor by 4px on every side.
+        # If DPI/monitor-bounds rounding leaves even a 1px gap, the (usually
+        # light) desktop shows through as a "white edge" — oversizing buries
+        # that possibility. Also keep chrome black on the way out, because
+        # pywebview's exit path resets the border to the light OS default.
+        try:
+            from webview.platforms import winforms as _wf
+
+            def _fix():
+                try:
+                    if on:
+                        form.TopMost = True
+                        form.WindowState = _wf.WinForms.FormWindowState.Normal
+                        scr = _wf.WinForms.Screen.FromControl(form).Bounds
+                        form.Location = _wf.Point(scr.X - 4, scr.Y - 4)
+                        form.Size = _wf.Size(scr.Width + 8, scr.Height + 8)
+                        _dbg("fs ENTER bounds=%s over-cover applied" % (scr,))
+                    else:
+                        form.TopMost = False
+                        _dbg("fs EXIT")
+                    _force_dark_chrome(form)
+                except Exception as e:
+                    _dbg("fs fixup FAIL %r" % e)
+
+            if form.InvokeRequired:
+                from System import Action
+                form.Invoke(Action(_fix))
+            else:
+                _fix()
+        except Exception:
+            pass
+        return on
 
     def pick_files(self):
         """Native Open-video dialog. Returns packed http urls or None."""
@@ -290,6 +372,7 @@ def main() -> None:
     api.base = f"http://127.0.0.1:{port}"
 
     index = find_index_html()
+    _patch_dark_chrome()  # black title bar + border even on light Windows theme
     webview.create_window(
         "Triple Vertical Player - 9:16 x3 Synced",
         url=index.as_uri(),
@@ -300,6 +383,21 @@ def main() -> None:
         js_api=api,
         background_color="#000000",  # WebView2 + window chrome stay black: no white edge lines
     )
+    if "--test-fs" in sys.argv:
+        # TEST HOOK (not used in normal runs): enter fullscreen once shown,
+        # so automated checks can photograph the fullscreen wall.
+        def _auto_fs(*a):
+            try:
+                _dbg("auto-fs toggle ENTER...")
+                api.toggle_fullscreen()
+                import time as _t
+                _t.sleep(2)
+                _dbg("auto-fs toggle EXIT...")
+                api.toggle_fullscreen()
+            except Exception as e:
+                _dbg("auto-fs FAIL %r" % e)
+
+        webview.windows[0].events.shown += _auto_fs
     webview.start(gui="edgechromium", debug=False)
 
 

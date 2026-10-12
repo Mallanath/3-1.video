@@ -6,11 +6,14 @@
 <title>Triple Vertical Editor — 9:16 × 3 Synced</title>
 <style>
   /* Single font + VLC-style flat uniform controls used across the whole app */
-  :root { --font:"Segoe UI",system-ui,sans-serif; --bg:#0e0f13; --panel:#16171c; --border:#2b2e38; --accent:#4da3ff; --text:#e8eaf0; --muted:#9aa0b4; }
+  :root { --font:"Segoe UI",system-ui,sans-serif; --bg:#0e0f13; --panel:#16171c; --border:#2b2e38; --accent:#4da3ff; --text:#e8eaf0; --muted:#9aa0b4; color-scheme:dark; }
   * { box-sizing:border-box; }
   html { height:100%; background:#000; }
-  html, body { height:100%; }
-  body { margin:0; padding:0; background:#000; color:var(--text); font-family:var(--font); height:100vh; overflow:hidden; display:flex; flex-direction:column; border:0; outline:0; }
+  html, body { height:100%; background:#000; }
+  :fullscreen, :fullscreen html, :fullscreen body { background:#000; }
+  body { margin:0; padding:0; background:#000; color:var(--text); font-family:var(--font); overflow:hidden; display:flex; flex-direction:column; border:0; outline:0;
+    /* lock the viewport: no body scroll, no OS-scrollbar gutter peeking as a white edge */
+    position:fixed; inset:0; width:100%; height:100%; }
   ::-webkit-scrollbar { width:0; height:0; display:none; }
   * { scrollbar-width:none; }
   header { padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; gap:6px; align-items:center; flex-wrap:wrap;
@@ -21,20 +24,33 @@
   button, select, label.filebtn, header label.chk { font-family:var(--font); font-size:12px; }
   button, select { background:#23262f; color:var(--text); border:1px solid var(--border); border-radius:6px; height:30px; padding:0 11px; line-height:28px; cursor:pointer; white-space:nowrap; }
   button:hover, select:hover { border-color:var(--accent); background:#282c37; }
-  button:focus-visible, select:focus-visible { outline:1px solid var(--accent); outline-offset:1px; }
+  /* No focus rings anywhere: a focused header button's light outline reads as a white edge line on video */
+  button:focus, button:focus-visible, select:focus, select:focus-visible, input:focus, video:focus { outline:none !important; outline-offset:0 !important; box-shadow:none !important; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600; }
   button.primary:hover { filter:brightness(1.08); }
   button:disabled { opacity:.4; cursor:default; }
-  #playBtn2, #prevBtn, #nextBtn { min-width:34px; text-align:center; padding:0 8px; }
+  #playBtn2, #prevBtn, #nextBtn, #backBtn, #fwdBtn { min-width:34px; text-align:center; padding:0 8px; }
   header label.chk { display:flex; gap:6px; align-items:center; height:30px; padding:0 6px; color:var(--muted); cursor:pointer; }
   header label.chk input { accent-color:var(--accent); }
-  main { padding:0; margin:0; width:100%; height:100vh; max-width:none; flex:1; background:#000; }
+  main { padding:0; margin:0; width:100%; height:100%; max-width:none; flex:1; background:#000; min-height:0;
+    /* pin the wall to the viewport so outer left/right/top/bottom can never expose background */
+    position:fixed; inset:0; overflow:hidden; }
   .hint { display:none; }
-  /* ---- EDGE-TO-EDGE WALL: 1 row x 3 cols, zero gaps, zero bars, zero edge lines ---- */
-  #stage { display:flex; gap:0; background:#000; border:0; outline:0; border-radius:0;
-    padding:0; margin:0; width:100vw; height:100vh; justify-content:stretch; align-items:stretch; overflow:hidden; }
+  /* ---- EDGE-TO-EDGE WALL: 1 row x 3 cols, zero gaps, zero bars, zero edge lines ----
+     White-seam kills (belt and suspenders — each alone fixes most cases):
+     1. viewport locked (body/main fixed inset:0, overflow hidden) — no scrollbar-gutter line
+     2. neighbour columns overlap 2px — fractional-pixel rounding can never expose
+        page/window background between panes as a hairline
+     3. each video bleeds 2px beyond its frame — video-vs-frame edge can never hairline
+     4. fullscreen stage bleeds 3px beyond the viewport — outer window edge never peeks
+     - everything pure black behind the videos */
+  #stage { display:flex; gap:0; column-gap:0; row-gap:0; background:#000; border:0; outline:0; border-radius:0;
+    padding:0; margin:0; width:100%; height:100%; justify-content:stretch; align-items:stretch; overflow:hidden;
+    position:absolute; inset:0; font-size:0; line-height:0; }
   .col { position:relative; background:#000; border:0; outline:0; border-radius:0; overflow:hidden;
-    flex:1 1 0; min-width:0; display:flex; flex-direction:column; max-width:none; }
+    flex:1 1 0; min-width:0; display:flex; flex-direction:column; max-width:none; margin:0; padding:0; font-size:0; line-height:0; }
+  /* overlap neighbours: swallows sub-pixel seams that read as white lines in fullscreen */
+  .col + .col { margin-left:-2px; }
   .col .tag { position:absolute; top:8px; left:8px; z-index:3; font-size:11px; background:rgba(0,0,0,.55); padding:3px 8px; border-radius:6px; border:1px solid rgba(255,255,255,.15);
     opacity:0; transition:opacity .2s; pointer-events:none; }
   /* Tags only in windowed mode with UI visible. NEVER in fullscreen, NEVER when UI hidden. */
@@ -47,17 +63,28 @@
     opacity:0; pointer-events:none; }
   body.ui-hidden #showUiFab { transform:translateX(-50%) translateY(0); opacity:1; pointer-events:auto; }
   body.ui-hidden.fs-idle #showUiFab { opacity:1 !important; pointer-events:auto !important; transform:translateX(-50%) translateY(0) !important; }
-  .frame { width:100%; height:100%; flex:1; overflow:hidden; background:#000; border:0; outline:0; line-height:0; }
-  .col video { width:100%; height:100%; object-fit:cover; display:block; background:#000; border:0; outline:0; vertical-align:top; }
+  .frame { width:100%; height:100%; flex:1; overflow:hidden; background:#000; border:0; outline:0; line-height:0; font-size:0; margin:0; padding:0; }
+  /* video bleeds 2px on every side inside its (overflow:hidden) frame: the video-vs-frame
+     edge can never show a background hairline. Costs ~0.4% crop, invisible. */
+  .col video { width:calc(100% + 4px); height:calc(100% + 4px); margin:-2px 0 0 -2px; object-fit:cover; object-position:center center; display:block; background:#000; border:0; outline:0; vertical-align:top; padding:0; box-shadow:none; }
   .col .mini { display:none; }
   #controls { position:fixed; bottom:0; left:0; right:0; z-index:20; margin:0;
     background:var(--panel); border:0; border-top:1px solid var(--border); border-radius:0;
     padding:6px 10px; display:grid; gap:4px; transition:transform .25s ease; font-family:var(--font); }
-  /* Fullscreen: kill every possible edge line — panels overlay video, stage is pure black */
-  body.is-fs, body.is-fs main, body.is-fs #stage, body.is-fs .col, body.is-fs .frame { background:#000; border:0; outline:0; margin:0; }
-  body.is-fs #stage { width:100vw; height:100vh; }
-  body.is-fs header { background:rgba(18,19,24,.88); }
-  body.is-fs #controls { background:rgba(18,19,24,.88); }
+  /* Fullscreen: kill every possible edge line — panels overlay video, stage is pure black.
+     Border removed entirely (a 1px border reads as a light line on black video).
+     Stage bleeds 3px beyond the viewport on all sides so no white window/WebView2
+     background can peek through at any outer edge or interior seam. */
+  body.is-fs, body.is-fs main, body.is-fs #stage, body.is-fs .col, body.is-fs .frame,
+  body.is-fs .col video { background:#000; border:0; outline:0; }
+  body.is-fs main { position:fixed; inset:0; overflow:hidden; }
+  body.is-fs .col + .col { margin-left:-2px; }
+  body.is-fs #stage { position:fixed; inset:-3px; width:auto; height:auto; }
+  body.is-fs header { background:rgba(18,19,24,.88); border:0; border-bottom:0; }
+  body.is-fs #controls { background:rgba(18,19,24,.88); border:0; border-top:0; }
+  /* browser Fullscreen-API fallback path (no Python): same pure-black treatment */
+  :fullscreen, :fullscreen #stage, :fullscreen .col, :fullscreen .frame, :fullscreen video { background:#000 !important; border:0 !important; outline:0 !important; }
+  :fullscreen #stage { position:fixed; inset:-3px; width:auto; height:auto; }
   body.ui-hidden #controls { transform:translateY(110%); }
   body.fs-idle header, body.fs-idle #controls { opacity:0; pointer-events:none; }
   /* true window fullscreen (Python-driven): hide panels, videos already fill all */
@@ -94,7 +121,7 @@
 <body>
 <header>
   <h1>Triple Vertical Player</h1>
-  <span class="badge">1 × 3 WALL · synced · F fullscreen · H hide UI</span>
+  <span class="badge">1 × 3 WALL · synced · F fullscreen · H hide UI · &lt; &gt; seek 5s</span>
   <button id="openFileBtn" title="Pick video file(s) — plays one after another">📂 Open video(s)</button>
   <button id="openFolderBtn" title="Pick a folder — every video inside plays continuously">📁 Open folder</button>
   <input id="file" type="file" accept="video/*" multiple hidden />
@@ -175,6 +202,8 @@
       <button id="playBtn2">▶ / ⏸ (Space)</button>
       <input id="seek" type="range" min="0" max="1000" value="0" step="1" />
       <span id="time">00:00 / 00:00</span>
+      <button id="backBtn" title="Back 5 seconds (< ,)">⏪ −5s</button>
+      <button id="fwdBtn" title="Forward 5 seconds (> .)">+5s ⏩</button>
       <button id="prevBtn" title="Previous video (P)">⏮</button>
       <button id="nextBtn" title="Next video (N)">⏭</button>
       <span id="nowPlaying" class="ratio-note"></span>
@@ -279,6 +308,9 @@
     applyCrop(i);
   });
   resetBtn.onclick = resetViews;
+  // Drop keyboard focus after any button click so no focus ring can ever
+  // linger as a light line around header/controls buttons.
+  document.querySelectorAll('button, select').forEach(el => el.addEventListener('click', () => { try { el.blur(); } catch(e){} }));
   // Shared wall sliders -> write to all 3 at once (identical side-by-side, no per-pane drift)
   function applyShared() {
     const z = document.getElementById('gz').value;
@@ -293,6 +325,16 @@
   }
   ['gz','gx','gy'].forEach(id => document.getElementById(id).addEventListener('input', applyShared));
   vids[0].muted = false; vids[1].muted = true; vids[2].muted = true;
+  // Quality: never downscale via attributes; let the browser decode at full
+  // source resolution and scale once via object-fit. No filters/opacity on
+  // videos (each would force an extra resampling pass = softness).
+  vids.forEach(v => {
+    v.preload = 'auto';
+    v.playsInline = true;
+    v.style.willChange = 'auto';
+    v.style.filter = '';
+    v.style.opacity = '';
+  });
 
   function loadUrl(url, name) {
     vids.forEach(v => { v.src = url; v.load(); });
@@ -302,7 +344,7 @@
     nowPlaying.textContent = playlist.length > 1 ? `${pIndex + 1}/${playlist.length} · ${name || ''}` : (name || '');
     applyLoopFlag();
     syncState.textContent = 'Sync: loading…';
-    vids.forEach(v => v.playbackRate = parseFloat(speedSel.value));
+    vids.forEach(v => v.playbackRate = parseFloat(speedSel.value) || 1);
     Promise.all(vids.map(v => v.play().catch(()=>{}))).then(updatePlayLabel);
   }
   function loadCurrent() {
@@ -437,10 +479,26 @@
     const label = master.paused ? '▶ Play' : '⏸ Pause';
     playBtn.textContent = label; playBtn2.textContent = label + ' (Space)';
   }
-  function playAll()  { if (!loaded) return; vids.forEach(v => v.playbackRate = parseFloat(speedSel.value)); vids.forEach(v => v.play().catch(()=>{})); }
+  function playAll()  { if (!loaded) return; const r = parseFloat(speedSel.value) || 1; vids.forEach(v => v.playbackRate = r); vids.forEach(v => v.play().catch(()=>{})); }
   function pauseAll() { vids.forEach(v => v.pause()); }
   function togglePlay() { if (!loaded) return; master.paused ? playAll() : pauseAll(); }
   playBtn.onclick = togglePlay; playBtn2.onclick = togglePlay;
+  // Frame-accurate-ish wall seek: jump ALL 3 panes to the same timestamp at
+  // once, then re-lock rates so the wall stays in sync (no per-pane drift).
+  function skipAll(sec) {
+    if (!loaded || !isFinite(master.duration) || !master.duration) return;
+    const dur = master.duration;
+    let t = master.currentTime + sec;
+    t = Math.max(0, Math.min(t, Math.max(0, dur - 0.05)));
+    vids.forEach(v => { try { v.currentTime = t; } catch(e){} });
+    try { seek.value = Math.round((t / dur) * 1000); } catch(e){}
+    timeEl.textContent = `${fmt(t)} / ${fmt(dur)}`;
+    hardSync();
+  }
+  const backBtn = document.getElementById('backBtn');
+  const fwdBtn = document.getElementById('fwdBtn');
+  if (backBtn) backBtn.onclick = () => skipAll(-5);
+  if (fwdBtn) fwdBtn.onclick = () => skipAll(5);
   function syncFsLabel() {
     const on = isFullscreen();
     fsBtn.textContent = on ? '⛶ Exit fullscreen (F)' : '⛶ Fullscreen (F)';
@@ -503,6 +561,21 @@
   window.addEventListener('keydown', e => {
     const tag = document.activeElement ? document.activeElement.tagName : '';
     const typing = /INPUT|SELECT|TEXTAREA/.test(tag);
+    // < / , = back 5s · > / . = forward 5s (Shift = 10s). Works with or without Shift:
+    // e.key is "<"/">" when shifted, ","/"." when not.
+    if ((e.key === '<' || e.key === ',') && !typing) {
+      e.preventDefault(); skipAll(e.shiftKey ? -10 : -5); return;
+    }
+    if ((e.key === '>' || e.key === '.') && !typing) {
+      e.preventDefault(); skipAll(e.shiftKey ? 10 : 5); return;
+    }
+    // Arrows do the same (also when the seek bar itself is focused).
+    if (e.key === 'ArrowLeft' && (!typing || document.activeElement === seek)) {
+      e.preventDefault(); skipAll(e.shiftKey ? -10 : -5); return;
+    }
+    if (e.key === 'ArrowRight' && (!typing || document.activeElement === seek)) {
+      e.preventDefault(); skipAll(e.shiftKey ? 10 : 5); return;
+    }
     if ((e.key === 'h' || e.key === 'H') && !typing) {
       e.preventDefault(); toggleUI(); return;
     }
@@ -533,20 +606,36 @@
   seek.addEventListener('change', () => { seeking = false; hardSync(); });
 
   fitSel.addEventListener('change', () => vids.forEach(v => v.style.objectFit = fitSel.value));
-  speedSel.addEventListener('change', () => vids.forEach(v => v.playbackRate = parseFloat(speedSel.value)));
+  speedSel.addEventListener('change', () => {
+    const r = parseFloat(speedSel.value) || 1;
+    master.playbackRate = r;
+    vids.forEach(v => v.playbackRate = r);
+  });
   // Loop is handled manually (repeat-one, wall stays in sync).
   // Native v.loop would restart each pane independently and drift apart.
   function applyLoopFlag() { vids.forEach(v => v.loop = false); }
   loopChk.addEventListener('change', applyLoopFlag);
   applyLoopFlag();
 
+  // ---- Quality-preserving sync ----
+  // Old behaviour re-seeked slaves on >80ms drift every 200ms. Every
+  // currentTime assignment flushes the decoder: the frame after a seek is a
+  // coarse/keyframe approximation, so constant micro-seeks read as permanent
+  // softness/blur + stutter. New behaviour:
+  //   drift > 0.35s  -> hard seek (something is really wrong)
+  //   0.04..0.35s    -> nudge slave playbackRate +-6% to glide back (no seek, no blur)
+  //   < 0.04s        -> leave alone at base rate (imperceptible, in sync)
+  // This keeps original resolution/sharpness: no resampling, no re-decode.
+  const HARD_GAP = 0.35, SOFT_GAP = 0.04, NUDGE = 0.06;
+  const baseRate = () => parseFloat(speedSel.value) || 1;
   function hardSync() {
     if (!loaded) return;
-    const t = master.currentTime;
+    const t = master.currentTime, r = baseRate();
+    master.playbackRate = r;
     vids.forEach((v, i) => {
       if (i === 0) return;
       try { if (Math.abs(v.currentTime - t) > 0.03) v.currentTime = t; } catch(e){}
-      v.playbackRate = master.playbackRate;
+      v.playbackRate = r;
       if (master.paused && !v.paused) v.pause();
       if (!master.paused && v.paused) v.play().catch(()=>{});
     });
@@ -557,21 +646,41 @@
     if (!loaded || !isFinite(master.duration) || !master.duration) return;
     if (!seeking) seek.value = Math.round((master.currentTime / master.duration) * 1000);
     timeEl.textContent = `${fmt(master.currentTime)} / ${fmt(master.duration)}`;
+    const r = baseRate();
+    if (master.playbackRate !== r && !seeking) master.playbackRate = r;
     let maxDrift = 0;
     vids.forEach((v, i) => {
       if (i === 0 || !isFinite(v.currentTime)) return;
-      const d = Math.abs(v.currentTime - master.currentTime);
+      const delta = v.currentTime - master.currentTime; // >0 slave ahead, <0 behind
+      const d = Math.abs(delta);
       maxDrift = Math.max(maxDrift, d);
-      if (d > 0.08) { try { v.currentTime = master.currentTime; } catch(e){} }
-      if (v.playbackRate !== master.playbackRate) v.playbackRate = master.playbackRate;
+      if (seeking) return; // user is scrubbing: seek handler drives all panes
+      if (master.paused) {
+        if (!v.paused) v.pause();
+        if (v.playbackRate !== r) v.playbackRate = r;
+        return;
+      }
+      if (v.paused) v.play().catch(()=>{});
+      if (d > HARD_GAP) {
+        try { v.currentTime = master.currentTime; } catch(e){}
+        if (v.playbackRate !== r) v.playbackRate = r;
+      } else if (delta > SOFT_GAP) {
+        const slow = r * (1 - NUDGE); // slave ahead -> ease off
+        if (v.playbackRate !== slow) v.playbackRate = slow;
+      } else if (delta < -SOFT_GAP) {
+        const fast = r * (1 + NUDGE); // slave behind -> catch up gently
+        if (v.playbackRate !== fast) v.playbackRate = fast;
+      } else if (v.playbackRate !== r) {
+        v.playbackRate = r; // in sync: identical rate, zero resampling
+      }
     });
     // Backup: if Loop is on and everything ended but playback stalled, restart same video.
     if (loopChk.checked && master.ended) {
       vids.forEach(v => { try { if (v.ended) v.currentTime = 0; } catch(e){} });
       if (master.paused) playAll();
     }
-    syncState.textContent = `Sync: drift ${(maxDrift*1000).toFixed(0)} ms · ${master.paused ? 'paused' : master.playbackRate + '× playing'} · wall locked`;
-  }, 200);
+    syncState.textContent = `Sync: drift ${(maxDrift*1000).toFixed(0)} ms · ${master.paused ? 'paused' : r + '× playing'} · wall locked`;
+  }, 250);
 
   vids.forEach((v, i) => {
     if (i === 0) return;
