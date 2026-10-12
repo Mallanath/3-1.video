@@ -207,14 +207,100 @@ class VideoHandler(BaseHTTPRequestHandler):
 
 def _dbg(msg):
     try:
-        with open(
-            r"C:\Users\CEPL\AppData\Local\Temp\opencode\chrome_patch.log",
-            "a",
-            encoding="utf-8",
-        ) as f:
+        import tempfile
+        import os
+        log = os.path.join(tempfile.gettempdir(), "TripleVerticalPlayer.log")
+        with open(log, "a", encoding="utf-8") as f:
             f.write(msg + "\n")
     except Exception:
         pass
+
+
+def _msgbox(text, title="Triple Vertical Player"):
+    """Show a native Windows message box. Works even in --windowed exe
+    (no console), so a missing WebView2 / startup failure is visible
+    instead of a silent 'nothing happens' double-click."""
+    try:
+        import ctypes
+        MB_ICONWARNING = 0x30
+        ctypes.windll.user32.MessageBoxW(0, str(text), str(title), MB_ICONWARNING)
+    except Exception:
+        try:
+            print(text)
+        except Exception:
+            pass
+
+
+def _webview2_installed() -> bool:
+    """True if the Edge WebView2 Runtime is present.
+
+    Checks (in order): registry key, loader DLL, WebView2 folder.
+    Missing runtime is the #1 reason the exe 'does nothing' on
+    another laptop (it is preinstalled on Win11 + updated Win10,
+    but not on fresh/lite Windows builds).
+    """
+    import os
+    # 1. Registry (system + user level)
+    try:
+        import winreg
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for sub in (
+                r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+            ):
+                try:
+                    with winreg.OpenKey(root, sub):
+                        return True
+                except OSError:
+                    continue
+    except Exception:
+        pass
+    # 2. Runtime folder
+    for p in (
+        r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+        r"C:\Program Files\Microsoft\EdgeWebView\Application",
+    ):
+        try:
+            if os.path.isdir(p):
+                return True
+        except Exception:
+            continue
+    # 3. Client DLL loadable
+    try:
+        import ctypes
+        from ctypes import wintypes  # noqa: F401
+        for dll in ("WebView2Loader.dll", "WebView2LoaderStatic.dll"):
+            try:
+                ctypes.WinDLL(dll)
+                return True
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _ensure_webview2() -> bool:
+    """If WebView2 is missing, tell the user plainly and open the
+    download page. Returns True when it is safe to start."""
+    if _webview2_installed():
+        return True
+    _msgbox(
+        "Microsoft Edge WebView2 Runtime was not found on this PC.\n\n"
+        "The player needs it once (free, ~2 min, from Microsoft).\n"
+        "Your browser will now open the download page — install "
+        "\"WebView2 Runtime\", then start Triple Vertical Player again.",
+        "Triple Vertical Player - WebView2 needed (one-time)",
+    )
+    try:
+        import webbrowser
+        webbrowser.open(
+            "https://developer.microsoft.com/microsoft-edge/webview2/"
+            "#download-section"
+        )
+    except Exception:
+        pass
+    return False
 
 
 def _force_dark_chrome(form):
@@ -487,6 +573,17 @@ def find_index_html() -> pathlib.Path:
 
 
 def main() -> None:
+    # On other laptops a missing WebView2 used to look like "exe does
+    # nothing" (windowed exe = no console = silent crash). Check first
+    # and guide the user instead.
+    try:
+        if sys.platform.startswith("win") and not _ensure_webview2():
+            sys.exit(2)
+    except SystemExit:
+        raise
+    except Exception:
+        pass  # never block startup on the check itself
+
     server = ThreadingHTTPServer(("127.0.0.1", 0), VideoHandler)
     server.daemon_threads = True
     port = server.server_address[1]
@@ -495,7 +592,11 @@ def main() -> None:
     api = Api()
     api.base = f"http://127.0.0.1:{port}"
 
-    index = find_index_html()
+    try:
+        index = find_index_html()
+    except FileNotFoundError as e:
+        _msgbox(str(e), "Triple Vertical Player - file missing")
+        raise SystemExit(1)
     _patch_dark_chrome()  # black title bar + border even on light Windows theme
     webview.create_window(
         "Triple Vertical Player - 9:16 x3 Synced",
@@ -522,8 +623,28 @@ def main() -> None:
                 _dbg("auto-fs FAIL %r" % e)
 
         webview.windows[0].events.shown += _auto_fs
-    webview.start(gui="edgechromium", debug=False)
+    try:
+        webview.start(gui="edgechromium", debug=False)
+    except Exception as e:
+        _msgbox(
+            "Could not start the video window.\n\n"
+            f"Details: {e}\n\n"
+            "Most common fix: install the free Microsoft Edge WebView2 "
+            "Runtime, then try again.",
+            "Triple Vertical Player - startup failed",
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:  # last resort: never die silently in windowed exe
+        try:
+            _msgbox(f"Unexpected error:\n\n{e}",
+                      "Triple Vertical Player - error")
+        except Exception:
+            pass
+        raise

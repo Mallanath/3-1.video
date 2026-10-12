@@ -1,2 +1,10 @@
-pywebview>=5.1
-pyinstaller>=6.0
+# Tested-good versions. Newer pywebview/pyinstaller usually work too,
+# but these are the versions the exe was verified with.
+pywebview==6.2.1
+pyinstaller==6.22.3
+# Pulled in automatically, listed here so `pip install` never skips them
+# on a fresh laptop (missing one = exe that silently won't start):
+pythonnet>=3.0
+clr-loader>=0.3
+bottle>=0.13
+proxy-tools>=0.1

@@ -10,10 +10,21 @@ pip install -r requirements.txt
 python app.py
 ```
 
-## Build the exe
+## Install on any laptop (no Python needed)
+
+See `README-INSTALL.txt`. Short version:
+
+- **Setup:** run `Output\TripleVerticalPlayer-Setup.exe` (from `Build-Installer.bat`)
+- **Portable:** unzip `TripleVerticalPlayer-Portable.zip`, double-click `Install.bat`
+  (or just run `TripleVerticalPlayer.exe` directly)
+
+First run may ask for the free Microsoft Edge WebView2 Runtime (one-time).
+
+## Build the exe (developer PC)
 
 ```bat
-build_exe.bat
+build_exe.bat        - builds dist\TripleVerticalPlayer.exe, never opens the app
+Build-Installer.bat  - builds exe + Portable ZIP + Setup.exe (if Inno Setup 6 installed)
 ```
 
 Output: `dist\TripleVerticalPlayer.exe` (no install needed, Windows 10/11).
