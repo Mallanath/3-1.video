@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Triple Vertical Editor — 9:16 × 3 Synced</title>
+<style>
+  /* Single font + VLC-style flat uniform controls used across the whole app */
+  :root { --font:"Segoe UI",system-ui,sans-serif; --bg:#0e0f13; --panel:#16171c; --border:#2b2e38; --accent:#4da3ff; --text:#e8eaf0; --muted:#9aa0b4; }
+  * { box-sizing:border-box; }
+  html { height:100%; background:#000; }
+  html, body { height:100%; }
+  body { margin:0; padding:0; background:#000; color:var(--text); font-family:var(--font); height:100vh; overflow:hidden; display:flex; flex-direction:column; border:0; outline:0; }
+  ::-webkit-scrollbar { width:0; height:0; display:none; }
+  * { scrollbar-width:none; }
+  header { padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; gap:6px; align-items:center; flex-wrap:wrap;
+    position:fixed; top:0; left:0; right:0; z-index:20; transition:transform .25s ease; }
+  body.ui-hidden header { transform:translateY(-110%); }
+  header h1 { font-family:var(--font); font-size:13px; font-weight:600; margin:0 6px 0 0; white-space:nowrap; letter-spacing:.2px; }
+  .badge { font-family:var(--font); font-size:10px; background:#0b2a4a; color:var(--accent); border:1px solid #214d7d; padding:2px 8px; border-radius:20px; white-space:nowrap; }
+  button, select, label.filebtn, header label.chk { font-family:var(--font); font-size:12px; }
+  button, select { background:#23262f; color:var(--text); border:1px solid var(--border); border-radius:6px; height:30px; padding:0 11px; line-height:28px; cursor:pointer; white-space:nowrap; }
+  button:hover, select:hover { border-color:var(--accent); background:#282c37; }
+  button:focus-visible, select:focus-visible { outline:1px solid var(--accent); outline-offset:1px; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600; }
+  button.primary:hover { filter:brightness(1.08); }
+  button:disabled { opacity:.4; cursor:default; }
+  #playBtn2, #prevBtn, #nextBtn { min-width:34px; text-align:center; padding:0 8px; }
+  header label.chk { display:flex; gap:6px; align-items:center; height:30px; padding:0 6px; color:var(--muted); cursor:pointer; }
+  header label.chk input { accent-color:var(--accent); }
+  main { padding:0; margin:0; width:100%; height:100vh; max-width:none; flex:1; background:#000; }
+  .hint { display:none; }
+  /* ---- EDGE-TO-EDGE WALL: 1 row x 3 cols, zero gaps, zero bars, zero edge lines ---- */
+  #stage { display:flex; gap:0; background:#000; border:0; outline:0; border-radius:0;
+    padding:0; margin:0; width:100vw; height:100vh; justify-content:stretch; align-items:stretch; overflow:hidden; }
+  .col { position:relative; background:#000; border:0; outline:0; border-radius:0; overflow:hidden;
+    flex:1 1 0; min-width:0; display:flex; flex-direction:column; max-width:none; }
+  .col .tag { position:absolute; top:8px; left:8px; z-index:3; font-size:11px; background:rgba(0,0,0,.55); padding:3px 8px; border-radius:6px; border:1px solid rgba(255,255,255,.15);
+    opacity:0; transition:opacity .2s; pointer-events:none; }
+  /* Tags only in windowed mode with UI visible. NEVER in fullscreen, NEVER when UI hidden. */
+  body:not(.ui-hidden):not(.is-fs) .col .tag { opacity:1; }
+  body.is-fs .col .tag, body.ui-hidden .col .tag, :fullscreen .col .tag { opacity:0 !important; display:none !important; }
+  /* Floating restore button — visible only when UI is hidden, always clickable */
+  #showUiFab { position:fixed; top:10px; left:50%; transform:translateX(-50%) translateY(-80px); z-index:50;
+    background:rgba(20,24,36,.95); border:1px solid var(--accent); color:var(--text); border-radius:20px;
+    padding:8px 16px; font-size:12.5px; cursor:pointer; transition:transform .25s ease, opacity .2s;
+    opacity:0; pointer-events:none; }
+  body.ui-hidden #showUiFab { transform:translateX(-50%) translateY(0); opacity:1; pointer-events:auto; }
+  body.ui-hidden.fs-idle #showUiFab { opacity:1 !important; pointer-events:auto !important; transform:translateX(-50%) translateY(0) !important; }
+  .frame { width:100%; height:100%; flex:1; overflow:hidden; background:#000; border:0; outline:0; line-height:0; }
+  .col video { width:100%; height:100%; object-fit:cover; display:block; background:#000; border:0; outline:0; vertical-align:top; }
+  .col .mini { display:none; }
+  #controls { position:fixed; bottom:0; left:0; right:0; z-index:20; margin:0;
+    background:var(--panel); border:0; border-top:1px solid var(--border); border-radius:0;
+    padding:6px 10px; display:grid; gap:4px; transition:transform .25s ease; font-family:var(--font); }
+  /* Fullscreen: kill every possible edge line — panels overlay video, stage is pure black */
+  body.is-fs, body.is-fs main, body.is-fs #stage, body.is-fs .col, body.is-fs .frame { background:#000; border:0; outline:0; margin:0; }
+  body.is-fs #stage { width:100vw; height:100vh; }
+  body.is-fs header { background:rgba(18,19,24,.88); }
+  body.is-fs #controls { background:rgba(18,19,24,.88); }
+  body.ui-hidden #controls { transform:translateY(110%); }
+  body.fs-idle header, body.fs-idle #controls { opacity:0; pointer-events:none; }
+  /* true window fullscreen (Python-driven): hide panels, videos already fill all */
+  body.is-fs header, body.is-fs #controls { transition:transform .25s ease, opacity .3s ease; }
+  body.is-fs.fs-idle header, body.is-fs.fs-idle #controls { opacity:0; pointer-events:none; }
+  header, #controls { transition:transform .25s ease, opacity .3s ease; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-family:var(--font); }
+  #seek { flex:1; min-width:120px; accent-color:var(--accent); height:30px; }
+  #time { font-family:var(--font); font-variant-numeric:tabular-nums; font-size:12px; color:var(--muted); min-width:118px; white-space:nowrap; }
+  .ratio-note { font-family:var(--font); font-size:11px; color:var(--muted); }
+  #nowPlaying, #syncState { font-family:var(--font); }
+  .ctl-zoom { display:flex; gap:6px; align-items:center; font-family:var(--font); font-size:12px; color:var(--muted); height:30px; }
+  .ctl-zoom input[type="range"] { width:90px; accent-color:var(--accent); }
+  /* Empty state — looks like a normal player (VLC/MPC style), NOT a drag-drop page */
+  #drop { position:fixed; inset:0; z-index:30; display:flex; align-items:center; justify-content:center;
+    background:#000; color:var(--text); font-size:15px; border:none; border-radius:0; padding:0; margin:0; }
+  #drop.hide { display:none; }
+  #drop.over { background:#000; outline:none; }
+  .empty-card { text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; padding:24px; }
+  .empty-icon { font-size:52px; opacity:.85; }
+  .empty-title { font-size:20px; font-weight:600; }
+  .empty-sub { font-size:13.5px; color:var(--muted); margin-bottom:10px; }
+  .empty-actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .empty-actions button { font-size:14px; padding:11px 20px; border-radius:10px; }
+  .empty-actions button.primary { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:700; }
+  #toast { position:fixed; bottom:86px; left:50%; transform:translateX(-50%) translateY(20px); z-index:40;
+    background:#3a1215; color:#ffd9dc; border:1px solid #7a2b31; padding:10px 16px; border-radius:10px;
+    font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
+    max-width:82vw; text-align:center; }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  #nowPlaying { max-width:30vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Triple Vertical Player</h1>
+  <span class="badge">1 × 3 WALL · synced · F fullscreen · H hide UI</span>
+  <button id="openFileBtn" title="Pick video file(s) — plays one after another">📂 Open video(s)</button>
+  <button id="openFolderBtn" title="Pick a folder — every video inside plays continuously">📁 Open folder</button>
+  <input id="file" type="file" accept="video/*" multiple hidden />
+  <input id="folderInput" type="file" webkitdirectory hidden />
+  <button id="playBtn" class="primary" disabled>▶ Play</button>
+  <button id="syncBtn" disabled>⟳ Sync</button>
+  <button id="fsBtn" title="Fullscreen 3-up (F)">⛶ Fullscreen (F)</button>
+  <button id="uiBtn" title="Hide/show panels (H)">👁 Hide UI (H)</button>
+  <button id="resetBtn" title="Reset all 3 views to identical">⟲ Same view</button>
+  <select id="fitSel" title="cover = edge-to-edge, no bars. contain = full frame but adds bars">
+    <option value="cover" selected>Fill — no black bars</option>
+    <option value="contain">Full frame (adds bars)</option>
+  </select>
+  <select id="speedSel" title="Playback speed">
+    <option value="0.5">0.5×</option>
+    <option value="1" selected>1×</option>
+    <option value="1.5">1.5×</option>
+    <option value="2">2×</option>
+  </select>
+  <label class="chk" title="Loop ON = repeat the same video · Loop OFF = play queue once">
+    <input type="checkbox" id="loopChk" checked /> Loop
+  </label>
+  <label class="chk" title="Keep all 3 views identical">
+    <input type="checkbox" id="linkChk" checked /> 🔗 Same ×3
+  </label>
+</header>
+
+<main>
+  <div class="hint">
+    Taken from <b>GridPlayer</b> (gridplayer/grid.py + GridLayout 1×3, multi-instance play/pause/seek broadcast) and
+    stripped to <b>vertical-only</b>: no layout switcher, no horizontal mode.<br>
+    Same file plays in all three <b>9:16</b> columns <b>in sync</b> — column 1 is the master (GridPlayer-style master/slave sync).
+    Only column 1 has sound by default to avoid echo. <b>🔗 Same view ×3</b> is ON so all 3 show the
+    <b>identical frame</b> — uncheck it only if you want different crops per column. Press <b>F</b> for fullscreen 3-up.
+  </div>
+
+  <div id="stage">
+    <div class="col" data-col="0">
+      <span class="tag">COL 1 · master 🔊</span>
+      <div class="frame"><video id="v0" playsinline preload="auto"></video></div>
+      <div class="mini">
+        <label>Zoom <input type="range" id="z0" min="1" max="3" step="0.01" value="1"></label>
+        <label>Pan X <input type="range" id="x0" min="-50" max="50" step="1" value="0"></label>
+        <label>Pan Y <input type="range" id="y0" min="-50" max="50" step="1" value="0"></label>
+        <label><span>Sound on</span><input type="checkbox" id="m0" checked></label>
+      </div>
+    </div>
+    <div class="col" data-col="1">
+      <span class="tag">COL 2 · synced</span>
+      <div class="frame"><video id="v1" playsinline preload="auto" muted></video></div>
+      <div class="mini">
+        <label>Zoom <input type="range" id="z1" min="1" max="3" step="0.01" value="1"></label>
+        <label>Pan X <input type="range" id="x1" min="-50" max="50" step="1" value="0"></label>
+        <label>Pan Y <input type="range" id="y1" min="-50" max="50" step="1" value="0"></label>
+        <label><span>Sound on</span><input type="checkbox" id="m1"></label>
+      </div>
+    </div>
+    <div class="col" data-col="2">
+      <span class="tag">COL 3 · synced</span>
+      <div class="frame"><video id="v2" playsinline preload="auto" muted></video></div>
+      <div class="mini">
+        <label>Zoom <input type="range" id="z2" min="1" max="3" step="0.01" value="1"></label>
+        <label>Pan X <input type="range" id="x2" min="-50" max="50" step="1" value="0"></label>
+        <label>Pan Y <input type="range" id="y2" min="-50" max="50" step="1" value="0"></label>
+        <label><span>Sound on</span><input type="checkbox" id="m2"></label>
+      </div>
+    </div>
+  </div>
+
+  <button id="showUiFab" title="Show panels (H)">👁 Show UI (H)</button>
+  <!-- No empty-screen overlay: app opens to a pure black wall like VLC/MPC.
+       The file chooser auto-opens on launch (see script below). -->
+  <div id="drop" class="hide"></div>
+  <div id="toast"></div>
+
+  <div id="controls">
+    <div class="row">
+      <button id="playBtn2">▶ / ⏸ (Space)</button>
+      <input id="seek" type="range" min="0" max="1000" value="0" step="1" />
+      <span id="time">00:00 / 00:00</span>
+      <button id="prevBtn" title="Previous video (P)">⏮</button>
+      <button id="nextBtn" title="Next video (N)">⏭</button>
+      <span id="nowPlaying" class="ratio-note"></span>
+      <span class="ctl-zoom">Zoom <input type="range" id="gz" min="1" max="3" step="0.01" value="1"></span>
+      <span class="ctl-zoom">Pan X <input type="range" id="gx" min="-50" max="50" step="1" value="0"></span>
+      <span class="ctl-zoom">Pan Y <input type="range" id="gy" min="-50" max="50" step="1" value="0"></span>
+    </div>
+    <div class="row">
+      <span class="ratio-note" id="syncState">Sync: waiting for video…</span>
+    </div>
+  </div>
+</main>
+
+<script>
+  // GridPlayer mapping:
+  //  - GridPlayer GridLayout(rows=1, cols=3)       -> #stage flex-row, 3 .col (no layout menu)
+  //  - GridPlayer per-video VLC instances          -> 3x <video> sharing one blob URL
+  //  - GridPlayer play_all / pause_all / seek_all  -> playAll()/pauseAll()/seek broadcast below
+  //  - GridPlayer crop dialog                      -> per-column Zoom/Pan (scale + transform-origin)
+  const vids = [document.getElementById('v0'), document.getElementById('v1'), document.getElementById('v2')];
+  const master = vids[0];
+  const fileInput = document.getElementById('file');
+  const playBtn = document.getElementById('playBtn');
+  const playBtn2 = document.getElementById('playBtn2');
+  const syncBtn = document.getElementById('syncBtn');
+  const seek = document.getElementById('seek');
+  const timeEl = document.getElementById('time');
+  const syncState = document.getElementById('syncState');
+  const fitSel = document.getElementById('fitSel');
+  const speedSel = document.getElementById('speedSel');
+  const loopChk = document.getElementById('loopChk');
+  const linkChk = document.getElementById('linkChk');
+  const resetBtn = document.getElementById('resetBtn');
+  const fsBtn = document.getElementById('fsBtn');
+  const stage = document.getElementById('stage');
+  const openFileBtn = document.getElementById('openFileBtn');
+  const openFolderBtn = document.getElementById('openFolderBtn');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const nowPlaying = document.getElementById('nowPlaying');
+  const toastEl = document.getElementById('toast');
+  let objectUrl = null, seeking = false, loaded = false;
+  let blobUrls = [];
+  let playlist = [], playNames = [], pIndex = 0;
+
+  function toast(msg, ms) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toast._h);
+    toast._h = setTimeout(() => toastEl.classList.remove('show'), ms || 5000);
+  }
+
+  const fmt = s => {
+    if (!isFinite(s)) return '00:00';
+    s = Math.max(0, Math.floor(s));
+    return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+  };
+
+  function applyCrop(i) {
+    const z = parseFloat(document.getElementById('z'+i).value);
+    const x = parseFloat(document.getElementById('x'+i).value);
+    const y = parseFloat(document.getElementById('y'+i).value);
+    if (z === 1 && x === 0 && y === 0) {
+      // Default view: no CSS transform at all, so the frame is rendered
+      // pixel-for-pixel with zero resampling/softening (original quality).
+      vids[i].style.transform = '';
+      vids[i].style.transformOrigin = '';
+    } else {
+      vids[i].style.transform = `scale(${z})`;
+      vids[i].style.transformOrigin = `${50 + x}% ${50 + y}%`;
+    }
+  }
+  function mirrorCrop(from) {
+    // 🔗 linked mode: any slider move copies to the other 2 columns -> identical side-by-side
+    if (!linkChk.checked) return;
+    const z = document.getElementById('z'+from).value;
+    const x = document.getElementById('x'+from).value;
+    const y = document.getElementById('y'+from).value;
+    [0,1,2].forEach(j => {
+      if (j === from) return;
+      document.getElementById('z'+j).value = z;
+      document.getElementById('x'+j).value = x;
+      document.getElementById('y'+j).value = y;
+      applyCrop(j);
+    });
+  }
+  function resetViews() {
+    [0,1,2].forEach(i => {
+      document.getElementById('z'+i).value = 1;
+      document.getElementById('x'+i).value = 0;
+      document.getElementById('y'+i).value = 0;
+      applyCrop(i);
+    });
+    document.getElementById('gz').value = 1;
+    document.getElementById('gx').value = 0;
+    document.getElementById('gy').value = 0;
+    linkChk.checked = true;
+  }
+  [0,1,2].forEach(i => {
+    ['z','x','y'].forEach(p => document.getElementById(p+i).addEventListener('input', () => { applyCrop(i); mirrorCrop(i); }));
+    document.getElementById('m'+i).addEventListener('change', e => { vids[i].muted = !e.target.checked; });
+    applyCrop(i);
+  });
+  resetBtn.onclick = resetViews;
+  // Shared wall sliders -> write to all 3 at once (identical side-by-side, no per-pane drift)
+  function applyShared() {
+    const z = document.getElementById('gz').value;
+    const x = document.getElementById('gx').value;
+    const y = document.getElementById('gy').value;
+    [0,1,2].forEach(i => {
+      document.getElementById('z'+i).value = z;
+      document.getElementById('x'+i).value = x;
+      document.getElementById('y'+i).value = y;
+      applyCrop(i);
+    });
+  }
+  ['gz','gx','gy'].forEach(id => document.getElementById(id).addEventListener('input', applyShared));
+  vids[0].muted = false; vids[1].muted = true; vids[2].muted = true;
+
+  function loadUrl(url, name) {
+    vids.forEach(v => { v.src = url; v.load(); });
+    loaded = true;
+    playBtn.disabled = syncBtn.disabled = false;
+    document.getElementById('drop').classList.add('hide');
+    nowPlaying.textContent = playlist.length > 1 ? `${pIndex + 1}/${playlist.length} · ${name || ''}` : (name || '');
+    applyLoopFlag();
+    syncState.textContent = 'Sync: loading…';
+    vids.forEach(v => v.playbackRate = parseFloat(speedSel.value));
+    Promise.all(vids.map(v => v.play().catch(()=>{}))).then(updatePlayLabel);
+  }
+  function loadCurrent() {
+    if (!playlist.length) return;
+    pIndex = Math.max(0, Math.min(pIndex, playlist.length - 1));
+    loadUrl(playlist[pIndex], playNames[pIndex]);
+  }
+  function updatePrevNext() {
+    const multi = playlist.length > 1;
+    prevBtn.disabled = nextBtn.disabled = !multi;
+    const tip = multi ? `Previous video (P) — ${pIndex + 1}/${playlist.length}` : 'Previous video (P) — open a folder or select multiple videos to enable';
+    prevBtn.title = tip;
+    nextBtn.title = multi ? `Next video (N) — ${pIndex + 1}/${playlist.length}` : 'Next video (N) — open a folder or select multiple videos to enable';
+  }
+  function setPlaylist(urls, names, idx) {
+    playlist = urls.slice(); playNames = (names || []).slice(); pIndex = idx || 0;
+    updatePrevNext();
+    loadCurrent();
+  }
+  function stepVideo(dir) {
+    if (playlist.length < 2) {
+      toast(playlist.length ? 'Only 1 video in the queue — “Open folder” or select multiple videos to use ⏮ ⏭.' : 'No video loaded — open a video first.', 3500);
+      return;
+    }
+    pIndex = (pIndex + dir + playlist.length) % playlist.length;
+    updatePrevNext();
+    loadCurrent();
+  }
+  prevBtn.onclick = () => stepVideo(-1);
+  nextBtn.onclick = () => stepVideo(1);
+  updatePrevNext();
+
+  // Desktop app bridge: true window fullscreen + startup files from Python.
+  // File/folder picking stays in the page (native WebView2 pickers, zero prompts).
+  function appApi() { return (window.pywebview && window.pywebview.api) || null; }
+  const folderInput = document.getElementById('folderInput');
+  const VIDEO_EXTS = ['mp4','m4v','webm','mov','mkv','avi','mpg','mpeg','ogv','flv','wmv','ts','m2ts','mts','3gp'];
+  const isVideoFile = f => {
+    const n = (f.name || '').toLowerCase();
+    return VIDEO_EXTS.some(e => n.endsWith('.' + e));
+  };
+  function queueFiles(files, labelKey) {
+    const vids = files.filter(isVideoFile);
+    if (!vids.length) { toast('No playable video files there. Best: MP4 / WebM / MOV.', 4000); return; }
+    vids.sort((a, b) => String(a[labelKey] || a.name).localeCompare(String(b[labelKey] || b.name)));
+    blobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(e){} });
+    blobUrls = [];
+    if (objectUrl) { try { URL.revokeObjectURL(objectUrl); } catch(e){} }
+    objectUrl = null;
+    const urls = vids.map(f => URL.createObjectURL(f));
+    blobUrls = urls.slice();
+    setPlaylist(urls, vids.map(f => f.name), 0);
+    if (urls.length > 1) toast(`Queued ${urls.length} videos — advancing automatically. ⏮ ⏭ / N / P to skip.`, 3500);
+  }
+  // Native Windows dialogs via Python first (reliable, no gesture block),
+  // HTML <input> pickers as browser fallback.
+  async function openFilePicker() {
+    const api = appApi();
+    if (api && api.pick_files) {
+      try {
+        const r = await api.pick_files();
+        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); return; }
+        return; // user cancelled native dialog -> stay on black, don't fall through
+      } catch(e) {}
+    }
+    fileInput.click();
+  }
+  async function openFolderPicker() {
+    const api = appApi();
+    if (api && api.pick_folder) {
+      try {
+        const r = await api.pick_folder();
+        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); return; }
+        return; // cancelled -> stay on black
+      } catch(e) {}
+    }
+    if ('webkitdirectory' in folderInput) folderInput.click();
+    else { fileInput.click(); toast('Folder pick not supported here — select many files instead.', 4000); }
+  }
+  openFileBtn.onclick = openFilePicker;
+  openFolderBtn.onclick = openFolderPicker;
+  folderInput.addEventListener('change', e => {
+    if (e.target.files.length) queueFiles(Array.from(e.target.files), 'webkitRelativePath');
+    folderInput.value = '';
+  });
+  let autoOpened = false;
+  async function autoOpenOnce() {
+    // App launch with no video -> pop the Open dialog immediately,
+    // so the user never sits on an empty screen.
+    if (autoOpened || playlist.length) return;
+    autoOpened = true;
+    await openFilePicker();
+  }
+  window.addEventListener('pywebviewready', async () => {
+    try {
+      const api = appApi();
+      const s = api ? await api.get_startup() : null;
+      if (s && s.urls && s.urls.length) { setPlaylist(s.urls, s.names, s.index || 0); return; }
+      // No startup file (normal double-click launch) -> open chooser at once.
+      setTimeout(autoOpenOnce, 400);
+    } catch(e) {}
+  });
+  // Browser fallback (no pywebview): don't auto-click (browsers block it
+  // without a gesture) — user just presses Open video(s) in the header.
+  window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      if (!window.pywebview && !playlist.length && !autoOpened) {
+        // stay on pure black wall; header buttons are the entry point
+      }
+    }, 800);
+  });
+  // Surface silent JS failures as toasts so nothing ever "does nothing".
+  window.addEventListener('error', e => {
+    try { toast('Error: ' + (e.message || 'unknown'), 6000); } catch(_){}
+  });
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files.length) queueFiles(Array.from(e.target.files), 'name');
+    fileInput.value = '';
+  });
+  // Drag-and-drop still works silently in the background, but it is no longer
+  // advertised — the empty screen is a normal player-style Open screen.
+  window.addEventListener('dragover', e => { e.preventDefault(); });
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      queueFiles(Array.from(e.dataTransfer.files), 'name');
+    }
+  });
+
+  function updatePlayLabel() {
+    const label = master.paused ? '▶ Play' : '⏸ Pause';
+    playBtn.textContent = label; playBtn2.textContent = label + ' (Space)';
+  }
+  function playAll()  { if (!loaded) return; vids.forEach(v => v.playbackRate = parseFloat(speedSel.value)); vids.forEach(v => v.play().catch(()=>{})); }
+  function pauseAll() { vids.forEach(v => v.pause()); }
+  function togglePlay() { if (!loaded) return; master.paused ? playAll() : pauseAll(); }
+  playBtn.onclick = togglePlay; playBtn2.onclick = togglePlay;
+  function syncFsLabel() {
+    const on = isFullscreen();
+    fsBtn.textContent = on ? '⛶ Exit fullscreen (F)' : '⛶ Fullscreen (F)';
+  }
+  async function toggleFullscreen() {
+    // True window fullscreen via Python (borderless maximized window).
+    // The in-page Fullscreen API can't take over the OS window from WebView2.
+    const api = appApi();
+    if (api) {
+      try {
+        const on = await api.toggle_fullscreen();
+        document.body.classList.toggle('is-fs', !!on);
+        syncFsLabel();
+        pokeIdle();
+        return;
+      } catch(e) { toast('Fullscreen failed: ' + (e && e.message ? e.message : e), 4000); }
+    }
+    if (document.fullscreenElement) { document.exitFullscreen().catch(()=>{}); return; }
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+  }
+  fsBtn.onclick = toggleFullscreen;
+  stage.addEventListener('dblclick', toggleFullscreen);
+  // H = hide/show all panels for a pure video wall (also the 👁 button).
+  // Fixed: when UI is hidden the header is gone, so a floating "Show UI"
+  // pill appears — the Hide button is now always reversible with one click.
+  const uiBtn = document.getElementById('uiBtn');
+  const showUiFab = document.getElementById('showUiFab');
+  function toggleUI() {
+    const hidden = document.body.classList.toggle('ui-hidden');
+    uiBtn.textContent = hidden ? '👁 Show UI (H)' : '👁 Hide UI (H)';
+  }
+  uiBtn.onclick = toggleUI;
+  showUiFab.onclick = toggleUI;
+  // In fullscreen: mouse move shows panels instantly, mouse leaves window
+  // hides them instantly, staying still hides after 2.5s.
+  let idleTimer = null;
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.body.classList.contains('is-fs'));
+  }
+  function pokeIdle() {
+    document.body.classList.remove('fs-idle');
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    if (isFullscreen()) {
+      idleTimer = setTimeout(() => document.body.classList.add('fs-idle'), 2500);
+    }
+  }
+  function hideIdleInstant() {
+    // Mouse left the window while in fullscreen -> hide immediately, no delay.
+    if (!isFullscreen()) return;
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    document.body.classList.add('fs-idle');
+  }
+  window.addEventListener('mousemove', pokeIdle, { passive: true });
+  document.documentElement.addEventListener('mouseleave', hideIdleInstant);
+  document.addEventListener('mouseleave', hideIdleInstant);
+  document.addEventListener('fullscreenchange', () => { syncFsLabel(); pokeIdle(); });
+  window.addEventListener('keydown', e => {
+    const tag = document.activeElement ? document.activeElement.tagName : '';
+    const typing = /INPUT|SELECT|TEXTAREA/.test(tag);
+    if ((e.key === 'h' || e.key === 'H') && !typing) {
+      e.preventDefault(); toggleUI(); return;
+    }
+    if ((e.key === 'f' || e.key === 'F') && !typing) {
+      e.preventDefault(); toggleFullscreen(); return;
+    }
+    if (e.key === 'Escape' && document.body.classList.contains('is-fs')) {
+      e.preventDefault(); toggleFullscreen(); return;
+    }
+    if ((e.key === 'n' || e.key === 'N') && !typing && playlist.length > 1) {
+      e.preventDefault(); stepVideo(1); return;
+    }
+    if ((e.key === 'p' || e.key === 'P') && !typing && playlist.length > 1) {
+      e.preventDefault(); stepVideo(-1); return;
+    }
+    if (e.code === 'Space' && loaded && !typing) {
+      e.preventDefault(); togglePlay();
+    }
+  });
+  vids.forEach(v => { v.addEventListener('play', updatePlayLabel); v.addEventListener('pause', updatePlayLabel); });
+
+  seek.addEventListener('input', () => {
+    if (!loaded || !isFinite(master.duration)) return;
+    seeking = true;
+    const t = (seek.value / 1000) * master.duration;
+    vids.forEach(v => { try { v.currentTime = t; } catch(e){} });
+  });
+  seek.addEventListener('change', () => { seeking = false; hardSync(); });
+
+  fitSel.addEventListener('change', () => vids.forEach(v => v.style.objectFit = fitSel.value));
+  speedSel.addEventListener('change', () => vids.forEach(v => v.playbackRate = parseFloat(speedSel.value)));
+  // Loop is handled manually (repeat-one, wall stays in sync).
+  // Native v.loop would restart each pane independently and drift apart.
+  function applyLoopFlag() { vids.forEach(v => v.loop = false); }
+  loopChk.addEventListener('change', applyLoopFlag);
+  applyLoopFlag();
+
+  function hardSync() {
+    if (!loaded) return;
+    const t = master.currentTime;
+    vids.forEach((v, i) => {
+      if (i === 0) return;
+      try { if (Math.abs(v.currentTime - t) > 0.03) v.currentTime = t; } catch(e){}
+      v.playbackRate = master.playbackRate;
+      if (master.paused && !v.paused) v.pause();
+      if (!master.paused && v.paused) v.play().catch(()=>{});
+    });
+  }
+  syncBtn.onclick = hardSync;
+
+  setInterval(() => {
+    if (!loaded || !isFinite(master.duration) || !master.duration) return;
+    if (!seeking) seek.value = Math.round((master.currentTime / master.duration) * 1000);
+    timeEl.textContent = `${fmt(master.currentTime)} / ${fmt(master.duration)}`;
+    let maxDrift = 0;
+    vids.forEach((v, i) => {
+      if (i === 0 || !isFinite(v.currentTime)) return;
+      const d = Math.abs(v.currentTime - master.currentTime);
+      maxDrift = Math.max(maxDrift, d);
+      if (d > 0.08) { try { v.currentTime = master.currentTime; } catch(e){} }
+      if (v.playbackRate !== master.playbackRate) v.playbackRate = master.playbackRate;
+    });
+    // Backup: if Loop is on and everything ended but playback stalled, restart same video.
+    if (loopChk.checked && master.ended) {
+      vids.forEach(v => { try { if (v.ended) v.currentTime = 0; } catch(e){} });
+      if (master.paused) playAll();
+    }
+    syncState.textContent = `Sync: drift ${(maxDrift*1000).toFixed(0)} ms · ${master.paused ? 'paused' : master.playbackRate + '× playing'} · wall locked`;
+  }, 200);
+
+  vids.forEach((v, i) => {
+    if (i === 0) return;
+    // If a slave ends while the master already moved to the next video, ignore the stale event.
+    v.addEventListener('ended', () => {
+      if (v.src !== master.src) return;
+      if (loopChk.checked) return; // master 'ended' restarts all 3 together
+      if (playlist.length > 1) { try { v.currentTime = master.currentTime; } catch(e){} v.play().catch(()=>{}); }
+    });
+  });
+  master.addEventListener('ended', () => {
+    if (loopChk.checked) {
+      // Loop ON = repeat the SAME video on all 3 panes, in sync.
+      vids.forEach(v => { try { v.currentTime = 0; } catch(e){} });
+      playAll();
+      return;
+    }
+    if (playlist.length > 1) {
+      // Loop OFF = walk through the queue once, then stop at the end.
+      const n = pIndex + 1;
+      if (n >= playlist.length) { updatePlayLabel(); toast('Playlist finished.', 3000); return; }
+      pIndex = n; loadCurrent();
+    } else {
+      updatePlayLabel();
+    }
+  });
+  // Unsupported codec/container in WebView2 (e.g. some AVI/WMV/MKV) -> tell the user plainly.
+  master.addEventListener('error', () => {
+    if (!loaded) return;
+    toast(`⚠ "${playNames[pIndex] || 'This video'}" won't play here. Convert to MP4 (H.264) / WebM / MOV for best results.`, 7000);
+  });
+</script>
+</body>
+</html>
