@@ -123,7 +123,7 @@
   <h1>Triple Vertical Player</h1>
   <span class="badge">1 × 3 WALL · synced · F fullscreen · H hide UI · &lt; &gt; seek 5s</span>
   <button id="openFileBtn" title="Pick video file(s) — plays one after another">📂 Open video(s)</button>
-  <button id="openFolderBtn" title="Pick a folder — every video inside plays continuously">📁 Open folder</button>
+  <button id="openFolderBtn" title="Pick a folder — every video inside (subfolders included) plays continuously. The dialog lists folders, not files: select the folder itself.">📁 Open folder</button>
   <input id="file" type="file" accept="video/*" multiple hidden />
   <input id="folderInput" type="file" webkitdirectory hidden />
   <button id="playBtn" class="primary" disabled>▶ Play</button>
@@ -401,12 +401,20 @@
   }
   // Native Windows dialogs via Python first (reliable, no gesture block),
   // HTML <input> pickers as browser fallback.
+  // NOTE: Windows folder dialogs (FOS_PICKFOLDERS) list folders only — video
+  // files inside are intentionally hidden by Windows. That is normal: pick
+  // the folder and its videos (subfolders included) are queued on the next
+  // step. "Open video(s)" lists files; "Open folder" lists folders.
+  function announceQueue(urls) {
+    if (urls && urls.length > 1) toast(`Queued ${urls.length} videos — advancing automatically. ⏮ ⏭ / N / P to skip.`, 3500);
+  }
   async function openFilePicker() {
     const api = appApi();
     if (api && api.pick_files) {
       try {
         const r = await api.pick_files();
-        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); return; }
+        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); announceQueue(r.urls); return; }
+        if (r && r.error === 'no-videos') { toast('Those files are not playable videos. Best: MP4 / WebM / MOV.', 4000); return; }
         return; // user cancelled native dialog -> stay on black, don't fall through
       } catch(e) {}
     }
@@ -417,7 +425,11 @@
     if (api && api.pick_folder) {
       try {
         const r = await api.pick_folder();
-        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); return; }
+        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); announceQueue(r.urls); return; }
+        if (r && r.error === 'no-videos') {
+          toast(`No videos found in${r.folder ? ' ' + r.folder : ' that folder'} (subfolders included). Best: MP4 / WebM / MOV — or use “Open video(s)” to pick files directly.`, 6000);
+          return;
+        }
         return; // cancelled -> stay on black
       } catch(e) {}
     }
@@ -442,7 +454,7 @@
     try {
       const api = appApi();
       const s = api ? await api.get_startup() : null;
-      if (s && s.urls && s.urls.length) { setPlaylist(s.urls, s.names, s.index || 0); return; }
+      if (s && s.urls && s.urls.length) { setPlaylist(s.urls, s.names, s.index || 0); announceQueue(s.urls); return; }
       // No startup file (normal double-click launch) -> open chooser at once.
       setTimeout(autoOpenOnce, 400);
     } catch(e) {}

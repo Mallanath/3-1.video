@@ -59,15 +59,73 @@ def register(path: pathlib.Path) -> str:
     return token
 
 
-def video_files_in(folder: pathlib.Path):
+def _normalize_dialog_result(result):
+    """Normalize pywebview create_file_dialog output across versions.
+
+    Modern pywebview returns a tuple of paths (or None when cancelled),
+    but older releases returned a plain string for FOLDER/SAVE dialogs.
+    Iterating a string yields single characters, which silently finds no
+    videos — exactly the "Open folder shows nothing" bug. Always return
+    a list of Paths (empty list == cancelled).
+    """
+    if result is None:
+        return []
+    if isinstance(result, (str, bytes, pathlib.Path)):
+        result = [result]
+    paths = []
+    for r in result:
+        try:
+            if isinstance(r, bytes):
+                r = r.decode("utf-8", errors="replace")
+            if isinstance(r, pathlib.Path):
+                paths.append(r)
+            else:
+                s = str(r).strip()
+                if s:
+                    paths.append(pathlib.Path(s))
+        except Exception:
+            continue
+    return paths
+
+
+def video_files_in(folder: pathlib.Path, recursive=True):
+    """All playable videos in a folder, sorted A-Z.
+
+    recursive=True (default): scans subfolders too via rglob, so a folder
+    containing only subfolders full of videos still queues them. The old
+    top-level-only scan returned [] for such folders, making "Open folder"
+    look broken while "Open video(s)" (pick files directly) worked.
+    """
     try:
-        entries = list(folder.iterdir())
+        folder = pathlib.Path(folder)
+        if not folder.is_dir():
+            return []
+        if recursive:
+            entries = folder.rglob("*")
+        else:
+            entries = folder.iterdir()
     except OSError:
         return []
-    return sorted(
-        (p for p in entries if p.is_file() and p.suffix.lower() in VIDEO_EXTS),
-        key=lambda p: p.name.lower(),
-    )
+    vids = []
+    try:
+        for p in entries:
+            try:
+                if p.is_file() and p.suffix.lower() in VIDEO_EXTS:
+                    vids.append(p)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    try:
+        base = folder.resolve()
+    except OSError:
+        base = folder
+    def _key(p):
+        try:
+            return p.relative_to(base).as_posix().lower()
+        except ValueError:
+            return p.name.lower()
+    return sorted(vids, key=_key)
 
 
 class VideoHandler(BaseHTTPRequestHandler):
@@ -281,11 +339,12 @@ class Api:
             )
         except Exception:
             return None
-        if not result:
-            return None
-        vids = [pathlib.Path(p) for p in result if pathlib.Path(p).suffix.lower() in VIDEO_EXTS]
+        paths = _normalize_dialog_result(result)
+        if not paths:
+            return None  # user cancelled
+        vids = [p for p in paths if p.suffix.lower() in VIDEO_EXTS]
         if not vids:
-            return None
+            return {"urls": [], "names": [], "index": 0, "error": "no-videos"}
         if len(vids) == 1 and vids[0].is_file():
             # Single file picked: queue the whole folder so ⏮ ⏭ / N / P
             # step through sibling videos (same as drag-onto-exe behavior).
@@ -295,29 +354,70 @@ class Api:
                 try:
                     idx = sibs.index(vids[0].resolve())
                 except ValueError:
-                    idx = 0
+                    # sibs holds unresolved paths; compare by resolved string
+                    try:
+                        want = str(vids[0].resolve()).lower()
+                        idx = next(
+                            i for i, s in enumerate(sibs)
+                            if str(s.resolve()).lower() == want
+                        )
+                    except (ValueError, StopIteration, OSError):
+                        idx = 0
                 return self._pack(sibs, idx)
         return self._pack(sorted(vids, key=lambda p: p.name.lower()), 0)
 
     def pick_folder(self):
-        """Native Open-folder dialog. Returns packed http urls or None."""
+        """Native Open-folder dialog. Returns packed http urls or None.
+
+        Scans recursively (subfolders included) and tolerates old/new
+        pywebview return shapes (tuple vs plain string). Returns an
+        {"error": "no-videos"} dict — instead of silent None — when the
+        folder was picked but contains no playable videos, so the UI can
+        tell the user instead of sitting on a black screen.
+        """
         try:
             wins = webview.windows
             if not wins:
                 return None
-            result = wins[0].create_file_dialog(webview.FileDialog.FOLDER)
+            result = wins[0].create_file_dialog(
+                webview.FileDialog.FOLDER, allow_multiple=True
+            )
         except Exception:
             return None
-        if not result:
-            return None
+        raw = _normalize_dialog_result(result)
+        if not raw:
+            return None  # user cancelled
         paths = []
-        for f in result:
+        picked = []
+        for f in raw:
             folder = pathlib.Path(f)
-            if folder.is_dir():
-                paths.extend(video_files_in(folder))
+            try:
+                if folder.is_dir():
+                    picked.append(str(folder))
+                    paths.extend(video_files_in(folder, recursive=True))
+                elif folder.is_file() and folder.suffix.lower() in VIDEO_EXTS:
+                    paths.append(folder)
+            except OSError:
+                continue
         if not paths:
-            return None
-        return self._pack(paths, 0)
+            return {
+                "urls": [],
+                "names": [],
+                "index": 0,
+                "error": "no-videos",
+                "folder": "; ".join(picked) if picked else "",
+            }
+        # Dedupe (same file via two picked folders / symlinks) then sort.
+        seen, uniq = set(), []
+        for p in sorted(paths, key=lambda p: p.name.lower()):
+            try:
+                key = str(p.resolve()).lower()
+            except OSError:
+                key = str(p).lower()
+            if key not in seen:
+                seen.add(key)
+                uniq.append(p)
+        return self._pack(uniq, 0)
 
     def get_startup(self):
         """Files/folders passed on the command line (drag onto exe / Open with)."""
@@ -332,7 +432,14 @@ class Api:
                 try:
                     idx = vids.index(args[0].resolve())
                 except ValueError:
-                    idx = 0
+                    try:
+                        want = str(args[0].resolve()).lower()
+                        idx = next(
+                            i for i, s in enumerate(vids)
+                            if str(s.resolve()).lower() == want
+                        )
+                    except (ValueError, StopIteration, OSError):
+                        idx = 0
                 return self._pack(vids, idx)
             return self._pack([args[0]], 0)
         paths = []
@@ -340,7 +447,7 @@ class Api:
             if a.is_file():
                 paths.append(a)
             elif a.is_dir():
-                paths.extend(video_files_in(a))
+                paths.extend(video_files_in(a, recursive=True))
         if not paths:
             return None
         return self._pack(paths, 0)
