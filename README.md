@@ -45,3 +45,4 @@ Output: `dist\TripleVerticalPlayer.exe` (no install needed, Windows 10/11).
 
 Quality is lossless — original file bytes are streamed as-is, and at 1× zoom
 no CSS transform is applied, so frames render pixel-for-pixel.
+# 3VC-1.Video
