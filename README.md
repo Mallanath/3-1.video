@@ -1,4 +1,4 @@
-# 3VC.Video — Triple Vertical Player
+# 3-1.video — Triple Vertical Player
 
 1 × 3 synced video wall for 9:16 vertical videos. One file plays across all
 three panes in sync — column 1 is the master, columns 2–3 stay frame-locked.
@@ -45,4 +45,3 @@ Output: `dist\TripleVerticalPlayer.exe` (no install needed, Windows 10/11).
 
 Quality is lossless — original file bytes are streamed as-is, and at 1× zoom
 no CSS transform is applied, so frames render pixel-for-pixel.
-# 3VC-1.Video

@@ -17,11 +17,16 @@ Build exe (Windows):
     pyinstaller --noconfirm --onefile --windowed --name TripleVerticalPlayer --add-data "index.html;." app.py
     -> dist/TripleVerticalPlayer.exe
 """
+import hashlib
 import itertools
 import mimetypes
+import os
 import pathlib
+import queue
 import sys
 import threading
+import time
+from multiprocessing.connection import Client, Listener
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
 
@@ -48,6 +53,17 @@ MIME_OVERRIDES = {
     ".mov": "video/quicktime",
 }
 
+_USER_ID = os.environ.get("USERNAME") or os.environ.get("USER") or str(pathlib.Path.home())
+_INSTANCE_SUFFIX = hashlib.sha256(_USER_ID.casefold().encode("utf-8")).hexdigest()[:16]
+_INSTANCE_MUTEX_NAME = f"Local\\TripleVerticalPlayer-{_INSTANCE_SUFFIX}"
+_OPEN_PIPE_NAME = rf"\\.\pipe\TripleVerticalPlayer-{_INSTANCE_SUFFIX}"
+_OPEN_PIPE_AUTHKEY = hashlib.sha256(
+    f"TripleVerticalPlayer:{_INSTANCE_SUFFIX}".encode("ascii")
+).digest()
+_PENDING_OPEN_REQUESTS = queue.Queue()
+_OPEN_REQUEST_LISTENER = None
+_INSTANCE_MUTEX_HANDLE = None
+
 # token -> absolute Path, served at /v/<token>
 _registry = {}
 _token_seq = itertools.count(1)
@@ -57,6 +73,105 @@ def register(path: pathlib.Path) -> str:
     token = str(next(_token_seq))
     _registry[token] = path
     return token
+
+
+def _command_line_paths(argv=None):
+    """Absolute non-option paths supplied by Open With / drag-and-drop."""
+    args = sys.argv[1:] if argv is None else argv
+    paths = []
+    for arg in args:
+        value = str(arg).strip()
+        if not value or value.startswith("-"):
+            continue
+        try:
+            paths.append(str(pathlib.Path(value).expanduser().resolve()))
+        except (OSError, RuntimeError):
+            continue
+    return paths
+
+
+def _claim_single_instance():
+    """Return (is_primary, handle), using a per-user Windows mutex."""
+    if os.name != "nt":
+        return True, None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_mutex = kernel32.CreateMutexW
+        create_mutex.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        create_mutex.restype = wintypes.HANDLE
+        ctypes.set_last_error(0)
+        handle = create_mutex(None, False, _INSTANCE_MUTEX_NAME)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return ctypes.get_last_error() != 183, handle
+    except Exception as e:
+        _dbg("single-instance mutex failed %r" % e)
+        return None, None
+
+
+def _start_open_request_server():
+    """Listen for paths from later launches and queue them for the UI."""
+    global _OPEN_REQUEST_LISTENER
+    if os.name != "nt":
+        return True
+    try:
+        listener = Listener(
+            _OPEN_PIPE_NAME, family="AF_PIPE", authkey=_OPEN_PIPE_AUTHKEY
+        )
+    except Exception as e:
+        _dbg("open-request listener failed %r" % e)
+        return False
+    _OPEN_REQUEST_LISTENER = listener
+
+    def _serve():
+        while True:
+            try:
+                connection = listener.accept()
+            except (OSError, EOFError):
+                return
+            try:
+                payload = connection.recv()
+                if not isinstance(payload, list):
+                    connection.send(False)
+                    continue
+                paths = [str(p) for p in payload if str(p).strip()]
+                _PENDING_OPEN_REQUESTS.put(paths)
+                connection.send(True)
+            except Exception as e:
+                _dbg("open-request handoff failed %r" % e)
+            finally:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+    threading.Thread(target=_serve, name="OpenRequestPipe", daemon=True).start()
+    return True
+
+
+def _forward_open_request(paths, timeout=8.0):
+    """Send file paths to the active player instead of starting another UI."""
+    if os.name != "nt":
+        return False
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            connection = Client(
+                _OPEN_PIPE_NAME, family="AF_PIPE", authkey=_OPEN_PIPE_AUTHKEY
+            )
+            try:
+                connection.send(paths)
+                return bool(connection.recv())
+            finally:
+                connection.close()
+        except (OSError, EOFError, ValueError) as e:
+            if time.monotonic() >= deadline:
+                _dbg("open-request forward timed out %r" % e)
+                return False
+            time.sleep(0.1)
 
 
 def _normalize_dialog_result(result):
@@ -340,7 +455,7 @@ def _patch_dark_chrome():
 class Api:
     """Called from JS (pywebview runs these on a worker thread).
 
-    - get_startup: pure filesystem work, no UI.
+    - get_startup / get_pending_open: package startup and forwarded paths.
     - toggle_fullscreen: public Window.toggle_fullscreen plus a fullscreen
       gap guard (over-cover + black chrome) marshalled to the UI thread.
     - pick_files / pick_folder: native Windows file dialogs via
@@ -522,9 +637,9 @@ class Api:
                 uniq.append(p)
         return self._pack(uniq, 0)
 
-    def get_startup(self):
-        """Files/folders passed on the command line (drag onto exe / Open with)."""
-        args = [pathlib.Path(a) for a in sys.argv[1:] if not a.startswith("-")]
+    def _pack_startup_paths(self, raw_paths):
+        """Resolve files/folders passed on the command line or by IPC."""
+        args = [pathlib.Path(a) for a in raw_paths if not str(a).startswith("-")]
         if not args:
             return None
         if len(args) == 1 and args[0].is_file():
@@ -555,6 +670,23 @@ class Api:
             return None
         return self._pack(paths, 0)
 
+    def get_startup(self):
+        """Files/folders passed on the command line (drag onto exe / Open with)."""
+        return self._pack_startup_paths(_command_line_paths())
+
+    def get_pending_open(self):
+        """Drain file-open requests forwarded from later app launches."""
+        try:
+            paths = _PENDING_OPEN_REQUESTS.get_nowait()
+        except queue.Empty:
+            return None
+        while True:
+            try:
+                paths.extend(_PENDING_OPEN_REQUESTS.get_nowait())
+            except queue.Empty:
+                break
+        return self._pack_startup_paths(paths)
+
 
 def find_index_html() -> pathlib.Path:
     candidates = []
@@ -573,6 +705,32 @@ def find_index_html() -> pathlib.Path:
 
 
 def main() -> None:
+    global _INSTANCE_MUTEX_HANDLE
+    is_primary, mutex_handle = _claim_single_instance()
+    if is_primary is None:
+        _msgbox(
+            "Could not check whether Triple Vertical Player is already running.\n\n"
+            "The player was not opened to avoid creating a duplicate window.",
+            "Triple Vertical Player - startup failed",
+        )
+        raise SystemExit(1)
+    if not is_primary:
+        if not _forward_open_request(_command_line_paths()):
+            _msgbox(
+                "Triple Vertical Player is already running, but could not receive "
+                "the selected video. Keep the existing player open and try again.",
+                "Triple Vertical Player - open failed",
+            )
+        return
+    _INSTANCE_MUTEX_HANDLE = mutex_handle
+    if not _start_open_request_server():
+        _msgbox(
+            "Could not start the single-window file-open service.\n\n"
+            "The player was not opened to avoid duplicate windows.",
+            "Triple Vertical Player - startup failed",
+        )
+        raise SystemExit(1)
+
     # On other laptops a missing WebView2 used to look like "exe does
     # nothing" (windowed exe = no console = silent crash). Check first
     # and guide the user instead.

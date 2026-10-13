@@ -5,148 +5,197 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Triple Vertical Editor — 9:16 × 3 Synced</title>
 <style>
-  /* Single font + VLC-style flat uniform controls used across the whole app */
-  :root { --font:"Segoe UI",system-ui,sans-serif; --bg:#0e0f13; --panel:#16171c; --border:#2b2e38; --accent:#4da3ff; --text:#e8eaf0; --muted:#9aa0b4; color-scheme:dark; }
+  :root {
+    --font:"Segoe UI",system-ui,sans-serif;
+    --panel:#1b1c1f;
+    --panel-raised:#24262a;
+    --line:#34363b;
+    --accent:#f0782b;
+    --accent-hover:#ff8d43;
+    --text:#f1f1f2;
+    --muted:#a4a6aa;
+    color-scheme:dark;
+  }
   * { box-sizing:border-box; }
-  html { height:100%; background:#000; }
-  html, body { height:100%; background:#000; }
+  html, body { width:100%; height:100%; background:#000; }
   :fullscreen, :fullscreen html, :fullscreen body { background:#000; }
-  body { margin:0; padding:0; background:#000; color:var(--text); font-family:var(--font); overflow:hidden; display:flex; flex-direction:column; border:0; outline:0;
-    /* lock the viewport: no body scroll, no OS-scrollbar gutter peeking as a white edge */
+  body { margin:0; padding:0; background:#08090b; color:var(--text); font-family:var(--font); overflow:hidden; display:flex; flex-direction:column;
     position:fixed; inset:0; width:100%; height:100%; }
   ::-webkit-scrollbar { width:0; height:0; display:none; }
   * { scrollbar-width:none; }
-  header { padding:6px 10px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; gap:6px; align-items:center; flex-wrap:wrap;
-    position:fixed; top:0; left:0; right:0; z-index:20; transition:transform .25s ease; }
-  body.ui-hidden header { transform:translateY(-110%); }
-  header h1 { font-family:var(--font); font-size:13px; font-weight:600; margin:0 6px 0 0; white-space:nowrap; letter-spacing:.2px; }
-  .badge { font-family:var(--font); font-size:10px; background:#0b2a4a; color:var(--accent); border:1px solid #214d7d; padding:2px 8px; border-radius:20px; white-space:nowrap; }
-  button, select, label.filebtn, header label.chk { font-family:var(--font); font-size:12px; }
-  button, select { background:#23262f; color:var(--text); border:1px solid var(--border); border-radius:6px; height:30px; padding:0 11px; line-height:28px; cursor:pointer; white-space:nowrap; }
-  button:hover, select:hover { border-color:var(--accent); background:#282c37; }
-  /* No focus rings anywhere: a focused header button's light outline reads as a white edge line on video */
-  button:focus, button:focus-visible, select:focus, select:focus-visible, input:focus, video:focus { outline:none !important; outline-offset:0 !important; box-shadow:none !important; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600; }
-  button.primary:hover { filter:brightness(1.08); }
-  button:disabled { opacity:.4; cursor:default; }
-  #playBtn2, #prevBtn, #nextBtn, #backBtn, #fwdBtn { min-width:34px; text-align:center; padding:0 8px; }
-  header label.chk { display:flex; gap:6px; align-items:center; height:30px; padding:0 6px; color:var(--muted); cursor:pointer; }
-  header label.chk input { accent-color:var(--accent); }
-  main { padding:0; margin:0; width:100%; height:100%; max-width:none; flex:1; background:#000; min-height:0;
-    /* pin the wall to the viewport so outer left/right/top/bottom can never expose background */
-    position:fixed; inset:0; overflow:hidden; }
+  header { flex:0 0 auto; position:relative; z-index:20; background:#1a1b1e; border-bottom:1px solid #34363a;
+    display:flex; flex-direction:column; transition:transform .25s ease, opacity .3s ease; }
+  .titlebar { min-height:54px; padding:0 18px; display:flex; align-items:center; justify-content:space-between; gap:18px;
+    background:linear-gradient(180deg,#242528,#1b1c1f); border-bottom:1px solid #303236; }
+  .brand { display:flex; align-items:center; gap:11px; min-width:0; }
+  .mode-switch { display:flex; align-items:center; gap:3px; margin-left:auto; padding:3px; flex:0 0 auto; background:#17181a; border:1px solid #3c3e42; border-radius:6px; }
+  .mode-switch .mode-option { height:30px; padding:0 11px; background:transparent; border:1px solid transparent; border-radius:4px; color:#bfc0c3; font-size:11px; font-weight:650; }
+  .mode-switch .mode-option:hover:not(.active) { background:#303236; color:#f1f1f2; border-color:transparent; }
+  .mode-switch .mode-option.active, .mode-switch .mode-option.active:hover { background:#452817; border-color:#8f4b23; color:#ffbd91; }
+  .brand-mark { width:30px; height:30px; display:grid; place-items:center; border:1px solid #b95621; border-radius:8px;
+    background:linear-gradient(145deg,#ff974f,#d45b1f); color:#1c120b; font-size:13px; box-shadow:0 2px 10px rgba(240,120,43,.18); }
+  .brand-copy { min-width:0; display:flex; flex-direction:column; gap:1px; }
+  header h1 { font-size:14px; font-weight:650; margin:0; white-space:nowrap; letter-spacing:.15px; }
+  .brand-copy span { color:#a9aaad; font-size:10px; letter-spacing:.15px; }
+  .badge { font-size:10px; font-weight:650; color:#ffb27e; border:1px solid #704022; background:#392519; padding:4px 8px; border-radius:5px; white-space:nowrap; letter-spacing:.35px; }
+  .toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:9px 14px; background:#202124; }
+  .toolbar-group { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+  .toolbar-divider { height:24px; width:1px; background:#414246; margin:0 2px; }
+  .toolbar-spacer { flex:1 1 auto; }
+  button, select, label.chk, .select-control { font-family:var(--font); font-size:12px; }
+  button, select { background:#2a2c30; color:var(--text); border:1px solid #414348; border-radius:5px; height:34px; padding:0 11px; cursor:pointer; white-space:nowrap; transition:background .15s,border-color .15s,transform .15s; }
+  button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+  button:hover, select:hover { border-color:#73767c; background:#34363a; }
+  button:active { transform:translateY(1px); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#21140d; font-weight:700; }
+  button.primary:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+  button:disabled { opacity:.42; cursor:default; transform:none; }
+  .button-icon { width:15px; height:15px; display:inline-grid; place-items:center; font-size:15px; line-height:1; }
+  .select-control { display:flex; align-items:center; gap:7px; height:34px; padding:0 8px; color:#aeb0b4; border:1px solid #3c3e42; border-radius:5px; background:#252629; }
+  .select-control select { height:28px; border:0; padding:0 4px; background:transparent; color:var(--text); }
+  .select-control select:hover { background:transparent; }
+  header label.chk { display:flex; gap:6px; align-items:center; height:34px; padding:0 8px; color:#c0c1c4; cursor:pointer; border:1px solid #3c3e42; border-radius:5px; background:#252629; white-space:nowrap; }
+  header label.chk input { accent-color:var(--accent); margin:0; }
+  main { position:relative; flex:1 1 auto; min-height:0; width:100%; margin:0; padding:0; overflow:hidden; background:#000; }
   .hint { display:none; }
-  /* ---- EDGE-TO-EDGE WALL: 1 row x 3 cols, zero gaps, zero bars, zero edge lines ----
-     White-seam kills (belt and suspenders — each alone fixes most cases):
-     1. viewport locked (body/main fixed inset:0, overflow hidden) — no scrollbar-gutter line
-     2. neighbour columns overlap 2px — fractional-pixel rounding can never expose
-        page/window background between panes as a hairline
-     3. each video bleeds 2px beyond its frame — video-vs-frame edge can never hairline
-     4. fullscreen stage bleeds 3px beyond the viewport — outer window edge never peeks
-     - everything pure black behind the videos */
-  #stage { display:flex; gap:0; column-gap:0; row-gap:0; background:#000; border:0; outline:0; border-radius:0;
-    padding:0; margin:0; width:100%; height:100%; justify-content:stretch; align-items:stretch; overflow:hidden;
-    position:absolute; inset:0; font-size:0; line-height:0; }
-  .col { position:relative; background:#000; border:0; outline:0; border-radius:0; overflow:hidden;
-    flex:1 1 0; min-width:0; display:flex; flex-direction:column; max-width:none; margin:0; padding:0; font-size:0; line-height:0; }
-  /* overlap neighbours: swallows sub-pixel seams that read as white lines in fullscreen */
-  .col + .col { margin-left:-2px; }
-  .col .tag { position:absolute; top:8px; left:8px; z-index:3; font-size:11px; background:rgba(0,0,0,.55); padding:3px 8px; border-radius:6px; border:1px solid rgba(255,255,255,.15);
-    opacity:0; transition:opacity .2s; pointer-events:none; }
-  /* Tags only in windowed mode with UI visible. NEVER in fullscreen, NEVER when UI hidden. */
+  #stage { display:flex; gap:3px; background:#000; border:0; outline:0; border-radius:0; padding:12px 14px; margin:0; width:100%; height:100%; justify-content:stretch; align-items:stretch; overflow:hidden; position:absolute; inset:0; font-size:0; line-height:0; }
+  .col { position:relative; background:#000; border:1px solid #26282c; outline:0; border-radius:7px; overflow:hidden; flex:1 1 0; min-width:0; display:flex; flex-direction:column; max-width:none; margin:0; padding:0; font-size:0; line-height:0; }
+  .col .tag { position:absolute; top:10px; left:10px; z-index:3; font-size:10px; font-weight:650; letter-spacing:.35px; color:#ececee; background:rgba(15,16,18,.72); padding:5px 9px; border-radius:4px; border:1px solid rgba(255,255,255,.14); backdrop-filter:blur(8px); opacity:0; transition:opacity .2s; pointer-events:none; }
   body:not(.ui-hidden):not(.is-fs) .col .tag { opacity:1; }
   body.is-fs .col .tag, body.ui-hidden .col .tag, :fullscreen .col .tag { opacity:0 !important; display:none !important; }
-  /* Floating restore button — visible only when UI is hidden, always clickable */
-  #showUiFab { position:fixed; top:10px; left:50%; transform:translateX(-50%) translateY(-80px); z-index:50;
-    background:rgba(20,24,36,.95); border:1px solid var(--accent); color:var(--text); border-radius:20px;
-    padding:8px 16px; font-size:12.5px; cursor:pointer; transition:transform .25s ease, opacity .2s;
-    opacity:0; pointer-events:none; }
+  #showUiFab { position:fixed; top:10px; left:50%; transform:translateX(-50%) translateY(-80px); z-index:50; background:rgba(30,32,35,.96); border:1px solid #a95121; color:var(--text); border-radius:5px; padding:8px 16px; font-size:12.5px; cursor:pointer; transition:transform .25s ease, opacity .2s; opacity:0; pointer-events:none; }
   body.ui-hidden #showUiFab { transform:translateX(-50%) translateY(0); opacity:1; pointer-events:auto; }
   body.ui-hidden.fs-idle #showUiFab { opacity:1 !important; pointer-events:auto !important; transform:translateX(-50%) translateY(0) !important; }
   .frame { width:100%; height:100%; flex:1; overflow:hidden; background:#000; border:0; outline:0; line-height:0; font-size:0; margin:0; padding:0; }
-  /* video bleeds 2px on every side inside its (overflow:hidden) frame: the video-vs-frame
-     edge can never show a background hairline. Costs ~0.4% crop, invisible. */
   .col video { width:calc(100% + 4px); height:calc(100% + 4px); margin:-2px 0 0 -2px; object-fit:cover; object-position:center center; display:block; background:#000; border:0; outline:0; vertical-align:top; padding:0; box-shadow:none; }
+  body.single-mode #stage { gap:0; padding:0; }
+  body.single-mode #stage .col:not(:first-child) { display:none; }
+  body.single-mode #stage .col:first-child { flex:1 1 100%; border:0; border-radius:0; }
+  body.single-mode #stage .col .tag { display:none; }
   .col .mini { display:none; }
-  #controls { position:fixed; bottom:0; left:0; right:0; z-index:20; margin:0;
-    background:var(--panel); border:0; border-top:1px solid var(--border); border-radius:0;
-    padding:6px 10px; display:grid; gap:4px; transition:transform .25s ease; font-family:var(--font); }
-  /* Fullscreen: kill every possible edge line — panels overlay video, stage is pure black.
-     Border removed entirely (a 1px border reads as a light line on black video).
-     Stage bleeds 3px beyond the viewport on all sides so no white window/WebView2
-     background can peek through at any outer edge or interior seam. */
-  body.is-fs, body.is-fs main, body.is-fs #stage, body.is-fs .col, body.is-fs .frame,
-  body.is-fs .col video { background:#000; border:0; outline:0; }
-  body.is-fs main { position:fixed; inset:0; overflow:hidden; }
-  body.is-fs .col + .col { margin-left:-2px; }
-  body.is-fs #stage { position:fixed; inset:-3px; width:auto; height:auto; }
-  body.is-fs header { background:rgba(18,19,24,.88); border:0; border-bottom:0; }
-  body.is-fs #controls { background:rgba(18,19,24,.88); border:0; border-top:0; }
-  /* browser Fullscreen-API fallback path (no Python): same pure-black treatment */
-  :fullscreen, :fullscreen #stage, :fullscreen .col, :fullscreen .frame, :fullscreen video { background:#000 !important; border:0 !important; outline:0 !important; }
-  :fullscreen #stage { position:fixed; inset:-3px; width:auto; height:auto; }
-  body.ui-hidden #controls { transform:translateY(110%); }
-  body.fs-idle header, body.fs-idle #controls { opacity:0; pointer-events:none; }
-  /* true window fullscreen (Python-driven): hide panels, videos already fill all */
-  body.is-fs header, body.is-fs #controls { transition:transform .25s ease, opacity .3s ease; }
-  body.is-fs.fs-idle header, body.is-fs.fs-idle #controls { opacity:0; pointer-events:none; }
-  header, #controls { transition:transform .25s ease, opacity .3s ease; }
-  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-family:var(--font); }
-  #seek { flex:1; min-width:120px; accent-color:var(--accent); height:30px; }
-  #time { font-family:var(--font); font-variant-numeric:tabular-nums; font-size:12px; color:var(--muted); min-width:118px; white-space:nowrap; }
-  .ratio-note { font-family:var(--font); font-size:11px; color:var(--muted); }
-  #nowPlaying, #syncState { font-family:var(--font); }
-  .ctl-zoom { display:flex; gap:6px; align-items:center; font-family:var(--font); font-size:12px; color:var(--muted); height:30px; }
-  .ctl-zoom input[type="range"] { width:90px; accent-color:var(--accent); }
-  /* Empty state — looks like a normal player (VLC/MPC style), NOT a drag-drop page */
-  #drop { position:fixed; inset:0; z-index:30; display:flex; align-items:center; justify-content:center;
-    background:#000; color:var(--text); font-size:15px; border:none; border-radius:0; padding:0; margin:0; }
+  #controls { flex:0 0 auto; position:relative; z-index:20; margin:0; background:#1b1c1f; border:0; border-top:1px solid #3a3c40; border-radius:0; padding:9px 14px 8px; display:grid; gap:7px; transition:transform .25s ease, opacity .3s ease; font-family:var(--font); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-family:var(--font); }
+  .transport-row { display:grid; grid-template-columns:auto minmax(180px,1fr) minmax(100px,min(24vw,300px)); gap:14px; }
+  .transport-actions { display:flex; align-items:center; gap:5px; }
+  #playBtn2, #prevBtn, #nextBtn, #backBtn, #fwdBtn { min-width:34px; height:34px; text-align:center; padding:0 9px; }
+  #playBtn2 { min-width:42px; background:#33353a; border-color:#55575c; color:#fff; font-size:13px; }
+  #seekWrap { min-width:0; display:grid; grid-template-columns:112px minmax(80px,1fr); align-items:center; gap:10px; }
+  #seek { width:100%; min-width:80px; height:18px; accent-color:var(--accent); }
+  #time { font-variant-numeric:tabular-nums; font-size:12px; color:#e2e2e4; min-width:112px; white-space:nowrap; }
+  #nowPlaying { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; color:#c4c5c7; font-size:11px; }
+  .status-row { justify-content:space-between; gap:12px; min-height:24px; }
+  .ratio-note { font-size:11px; color:var(--muted); }
+  #syncState { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .wall-adjustments { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .ctl-zoom { display:flex; gap:7px; align-items:center; font-size:11px; color:#b7b8bb; height:24px; white-space:nowrap; }
+  .ctl-zoom input[type="range"] { width:78px; accent-color:var(--accent); }
+  #drop { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 43%,#17191d 0%,#0a0b0d 56%,#050506 100%); color:var(--text); font-size:15px; padding:20px; }
   #drop.hide { display:none; }
-  #drop.over { background:#000; outline:none; }
-  .empty-card { text-align:center; display:flex; flex-direction:column; align-items:center; gap:10px; padding:24px; }
-  .empty-icon { font-size:52px; opacity:.85; }
-  .empty-title { font-size:20px; font-weight:600; }
-  .empty-sub { font-size:13.5px; color:var(--muted); margin-bottom:10px; }
-  .empty-actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
-  .empty-actions button { font-size:14px; padding:11px 20px; border-radius:10px; }
-  .empty-actions button.primary { background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:700; }
-  #toast { position:fixed; bottom:86px; left:50%; transform:translateX(-50%) translateY(20px); z-index:40;
-    background:#3a1215; color:#ffd9dc; border:1px solid #7a2b31; padding:10px 16px; border-radius:10px;
-    font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
-    max-width:82vw; text-align:center; }
+  #drop.over { background:#141518; outline:1px solid #6c391f; outline-offset:-8px; }
+  .empty-card { width:min(520px,100%); text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; padding:30px 32px; border:1px solid #33353a; border-radius:12px; background:linear-gradient(145deg,rgba(35,37,41,.96),rgba(22,23,26,.97)); box-shadow:0 18px 55px rgba(0,0,0,.42); }
+  .empty-visual { height:74px; display:flex; align-items:center; gap:6px; margin-bottom:2px; }
+  .preview-pane { position:relative; display:block; width:39px; height:69px; border:1px solid #56585d; border-radius:5px; background:linear-gradient(155deg,#303238 0%,#111215 72%); box-shadow:inset 0 0 18px rgba(255,255,255,.035); }
+  .preview-pane:nth-child(2) { transform:translateY(-4px); border-color:#9a542e; background:linear-gradient(155deg,#53331f 0%,#171311 72%); }
+  .preview-pane::after { content:""; position:absolute; left:50%; top:50%; transform:translate(-38%,-50%); border-top:7px solid transparent; border-bottom:7px solid transparent; border-left:10px solid #e77a39; filter:drop-shadow(0 1px 4px rgba(0,0,0,.6)); }
+  .empty-title { font-size:20px; font-weight:650; letter-spacing:.1px; }
+  .empty-sub { max-width:400px; font-size:13px; line-height:1.55; color:#aeb0b4; margin:0 0 4px; }
+  .empty-actions { display:flex; gap:9px; flex-wrap:wrap; justify-content:center; }
+  .empty-actions button { height:38px; font-size:13px; padding:0 16px; border-radius:5px; }
+  .empty-hint { color:#85878b; font-size:11px; margin-top:2px; }
+  #toast { position:fixed; bottom:98px; left:50%; transform:translateX(-50%) translateY(20px); z-index:40; background:#3a1713; color:#ffe2d8; border:1px solid #874329; padding:10px 16px; border-radius:6px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; max-width:82vw; text-align:center; }
   #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
-  #nowPlaying { max-width:30vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  body.ui-hidden header { position:absolute; top:0; left:0; right:0; transform:translateY(-110%); }
+  body.ui-hidden #controls { position:absolute; bottom:0; left:0; right:0; transform:translateY(110%); }
+  body.fs-idle header, body.fs-idle #controls { opacity:0; pointer-events:none; }
+  body.is-fs, body.is-fs main, body.is-fs #stage, body.is-fs .col, body.is-fs .frame, body.is-fs .col video { background:#000; border:0; outline:0; }
+  body.is-fs main { position:fixed; inset:0; overflow:hidden; }
+  body.is-fs header { position:fixed; top:0; left:0; right:0; background:rgba(22,23,26,.92); border:0; }
+  body.is-fs #controls { position:fixed; bottom:0; left:0; right:0; background:rgba(22,23,26,.92); border:0; }
+  body.is-fs #stage { position:fixed; inset:-3px; width:auto; height:auto; padding:0; gap:0; }
+  body.is-fs .col { border-radius:0; }
+  body.is-fs .col + .col { margin-left:-2px; }
+  :fullscreen, :fullscreen #stage, :fullscreen .col, :fullscreen .frame, :fullscreen video { background:#000 !important; border:0 !important; outline:0 !important; }
+  :fullscreen #stage { position:fixed; inset:-3px; width:auto; height:auto; padding:0; gap:0; }
+  :fullscreen header { position:fixed; top:0; left:0; right:0; }
+  :fullscreen #controls { position:fixed; bottom:0; left:0; right:0; }
+  @media (max-width:900px) {
+    .titlebar { padding:0 12px; }
+    .brand-copy span { display:none; }
+    .toolbar { gap:6px; padding:8px 10px; }
+    .toolbar-divider { display:none; }
+    .toolbar-group { gap:5px; }
+    .toolbar button, header label.chk { padding-left:8px; padding-right:8px; }
+    .transport-row { grid-template-columns:auto minmax(180px,1fr); gap:8px 12px; }
+    #nowPlaying { grid-column:1 / -1; text-align:left; max-width:100%; padding-left:2px; }
+    .status-row { align-items:flex-start; }
+  }
+  @media (max-width:620px) {
+    .titlebar { min-height:48px; }
+    .badge { display:none; }
+    .toolbar { max-height:118px; overflow:auto; align-content:flex-start; }
+    .toolbar-spacer { display:none; }
+    .select-control { height:32px; }
+    .transport-row { display:flex; flex-wrap:wrap; gap:8px; }
+    .transport-actions { flex:0 0 auto; }
+    #seekWrap { flex:1 1 100%; order:2; grid-template-columns:96px minmax(80px,1fr); }
+    #time { min-width:96px; font-size:11px; }
+    #controls { padding:8px 10px; }
+    .status-row { gap:6px; }
+    .wall-adjustments { gap:8px; }
+    .ctl-zoom input[type="range"] { width:58px; }
+    .empty-card { padding:24px 18px; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>Triple Vertical Player</h1>
-  <span class="badge">1 × 3 WALL · synced · F fullscreen · H hide UI · &lt; &gt; seek 5s</span>
-  <button id="openFileBtn" title="Pick video file(s) — plays one after another">📂 Open video(s)</button>
-  <button id="openFolderBtn" title="Pick a folder — shows the videos inside while picking, then plays them all (subfolders included). Shift+click uses the system folder dialog.">📁 Open folder</button>
-  <input id="file" type="file" accept="video/*" multiple hidden />
-  <input id="folderInput" type="file" webkitdirectory multiple hidden />
-  <button id="playBtn" class="primary" disabled>▶ Play</button>
-  <button id="syncBtn" disabled>⟳ Sync</button>
-  <button id="fsBtn" title="Fullscreen 3-up (F)">⛶ Fullscreen (F)</button>
-  <button id="uiBtn" title="Hide/show panels (H)">👁 Hide UI (H)</button>
-  <button id="resetBtn" title="Reset all 3 views to identical">⟲ Same view</button>
-  <select id="fitSel" title="cover = edge-to-edge, no bars. contain = full frame but adds bars">
-    <option value="cover" selected>Fill — no black bars</option>
-    <option value="contain">Full frame (adds bars)</option>
-  </select>
-  <select id="speedSel" title="Playback speed">
-    <option value="0.5">0.5×</option>
-    <option value="1" selected>1×</option>
-    <option value="1.5">1.5×</option>
-    <option value="2">2×</option>
-  </select>
-  <label class="chk" title="Loop ON = repeat the same video · Loop OFF = play queue once">
-    <input type="checkbox" id="loopChk" checked /> Loop
-  </label>
-  <label class="chk" title="Keep all 3 views identical">
-    <input type="checkbox" id="linkChk" checked /> 🔗 Same ×3
-  </label>
+  <div class="titlebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">▶</span>
+      <div class="brand-copy">
+        <h1>Triple Vertical Player</h1>
+        <span>Three synchronized 9:16 views</span>
+      </div>
+      <span class="badge" id="modeBadge">1 × 3 WALL</span>
+    </div>
+    <div class="mode-switch" role="group" aria-label="Player mode">
+      <button id="mode3vcBtn" class="mode-option active" type="button" aria-pressed="true" title="Show three synchronized vertical columns">3VC · 3 columns</button>
+      <button id="modeSingleBtn" class="mode-option" type="button" aria-pressed="false" title="Show one video player">Single player</button>
+    </div>
+  </div>
+  <div class="toolbar" aria-label="Player tools">
+    <div class="toolbar-group">
+      <button id="openFileBtn" title="Pick video file(s) — plays one after another"><span class="button-icon" aria-hidden="true">▣</span> Open video</button>
+      <button id="openFolderBtn" title="Choose a folder to queue all videos inside it, including subfolders."><span class="button-icon" aria-hidden="true">▱</span> Open folder</button>
+      <input id="file" type="file" accept="video/*" multiple hidden />
+      <input id="folderInput" type="file" webkitdirectory multiple hidden />
+    </div>
+    <span class="toolbar-divider" role="separator"></span>
+    <div class="toolbar-group">
+      <button id="playBtn" class="primary" disabled>▶ Play</button>
+    </div>
+    <span class="toolbar-divider" role="separator"></span>
+    <div class="toolbar-group">
+      <label class="select-control" title="cover = edge-to-edge, no bars. contain = full frame but adds bars">Fit
+        <select id="fitSel">
+          <option value="cover" selected>Fill</option>
+          <option value="contain">Full frame</option>
+        </select>
+      </label>
+      <label class="select-control" title="Playback speed">Speed
+        <select id="speedSel">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+      <label class="chk" title="Loop ON = repeat the same video · Loop OFF = play queue once">
+        <input type="checkbox" id="loopChk" checked /> Loop
+      </label>
+    </div>
+  </div>
 </header>
 
 <main>
@@ -191,31 +240,55 @@
     </div>
   </div>
 
-  <button id="showUiFab" title="Show panels (H)">👁 Show UI (H)</button>
-  <!-- No empty-screen overlay: app opens to a pure black wall like VLC/MPC.
-       The file chooser auto-opens on launch (see script below). -->
-  <div id="drop" class="hide"></div>
-  <div id="toast"></div>
-
-  <div id="controls">
-    <div class="row">
-      <button id="playBtn2">▶ / ⏸ (Space)</button>
-      <input id="seek" type="range" min="0" max="1000" value="0" step="1" />
-      <span id="time">00:00 / 00:00</span>
-      <button id="backBtn" title="Back 5 seconds (< ,)">⏪ −5s</button>
-      <button id="fwdBtn" title="Forward 5 seconds (> .)">+5s ⏩</button>
-      <button id="prevBtn" title="Previous video (P)">⏮</button>
-      <button id="nextBtn" title="Next video (N)">⏭</button>
-      <span id="nowPlaying" class="ratio-note"></span>
-      <span class="ctl-zoom">Zoom <input type="range" id="gz" min="1" max="3" step="0.01" value="1"></span>
-      <span class="ctl-zoom">Pan X <input type="range" id="gx" min="-50" max="50" step="1" value="0"></span>
-      <span class="ctl-zoom">Pan Y <input type="range" id="gy" min="-50" max="50" step="1" value="0"></span>
-    </div>
-    <div class="row">
-      <span class="ratio-note" id="syncState">Sync: waiting for video…</span>
+  <button id="showUiFab" title="Show panels (H)">Show controls (H)</button>
+  <div id="drop" role="status" aria-live="polite">
+    <div class="empty-card">
+      <div class="empty-visual" aria-hidden="true">
+        <span class="preview-pane"></span><span class="preview-pane"></span><span class="preview-pane"></span>
+      </div>
+      <div class="empty-title">Your three-screen player is ready</div>
+      <div class="empty-sub">Open a video to watch it across three synchronized views, or choose a folder to queue your videos.</div>
+      <div class="empty-actions">
+        <button id="emptyOpenFileBtn" class="primary" type="button">Open video</button>
+        <button id="emptyOpenFolderBtn" type="button">Open folder</button>
+      </div>
+      <div class="empty-hint">Tip: press F for fullscreen · drop a video here to play</div>
     </div>
   </div>
+  <div id="toast"></div>
 </main>
+
+<div id="controls">
+    <div class="row transport-row">
+      <div class="transport-actions">
+        <button id="prevBtn" title="Previous video (P)" aria-label="Previous video">⏮</button>
+        <button id="backBtn" title="Back 5 seconds (< ,)" aria-label="Back 5 seconds">⏪</button>
+        <button id="playBtn2" title="Play or pause (Space)">▶ / ⏸</button>
+        <button id="fwdBtn" title="Forward 5 seconds (> .)" aria-label="Forward 5 seconds">⏩</button>
+        <button id="nextBtn" title="Next video (N)" aria-label="Next video">⏭</button>
+      </div>
+      <div id="seekWrap">
+        <span id="time">00:00 / 00:00</span>
+        <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek through video" />
+      </div>
+      <span id="nowPlaying" class="ratio-note"></span>
+    </div>
+    <div class="row status-row">
+      <span class="ratio-note" id="syncState">Sync: waiting for video…</span>
+      <div class="wall-adjustments">
+        <span class="ctl-zoom">Zoom <input type="range" id="gz" min="1" max="3" step="0.01" value="1" aria-label="Zoom all views"></span>
+      </div>
+    </div>
+</div>
+<div id="internalControls" hidden aria-hidden="true">
+  <button id="syncBtn" type="button"></button>
+  <button id="fsBtn" type="button"></button>
+  <button id="uiBtn" type="button"></button>
+  <button id="resetBtn" type="button"></button>
+  <input type="checkbox" id="linkChk" checked />
+  <input type="range" id="gx" min="-50" max="50" step="1" value="0" />
+  <input type="range" id="gy" min="-50" max="50" step="1" value="0" />
+</div>
 
 <script>
   // GridPlayer mapping:
@@ -244,6 +317,9 @@
   const prevBtn = document.getElementById('prevBtn');
   const nextBtn = document.getElementById('nextBtn');
   const nowPlaying = document.getElementById('nowPlaying');
+  const mode3vcBtn = document.getElementById('mode3vcBtn');
+  const modeSingleBtn = document.getElementById('modeSingleBtn');
+  const modeBadge = document.getElementById('modeBadge');
   const toastEl = document.getElementById('toast');
   let objectUrl = null, seeking = false, loaded = false;
   let blobUrls = [];
@@ -255,6 +331,23 @@
     clearTimeout(toast._h);
     toast._h = setTimeout(() => toastEl.classList.remove('show'), ms || 5000);
   }
+
+  function setPlayerMode(mode) {
+    const single = mode === 'single';
+    document.body.classList.toggle('single-mode', single);
+    mode3vcBtn.classList.toggle('active', !single);
+    modeSingleBtn.classList.toggle('active', single);
+    mode3vcBtn.setAttribute('aria-pressed', String(!single));
+    modeSingleBtn.setAttribute('aria-pressed', String(single));
+    modeBadge.textContent = single ? 'SINGLE PLAYER' : '1 × 3 WALL';
+    fitSel.disabled = single;
+    // Fit-only display adjustment. Sources, timestamps, playback rates,
+    // decoders and crop transforms are untouched by switching layouts.
+    const fit = single ? 'contain' : fitSel.value;
+    vids.forEach(v => { v.style.objectFit = fit; });
+  }
+  mode3vcBtn.addEventListener('click', () => setPlayerMode('3vc'));
+  modeSingleBtn.addEventListener('click', () => setPlayerMode('single'));
 
   const fmt = s => {
     if (!isFinite(s)) return '00:00';
@@ -399,12 +492,8 @@
     setPlaylist(urls, vids.map(f => f.name), 0);
     if (urls.length > 1) toast(`Queued ${urls.length} videos — advancing automatically. ⏮ ⏭ / N / P to skip.`, 3500);
   }
-  // Native Windows dialogs via Python first (reliable, no gesture block),
-  // HTML <input> pickers as browser fallback.
-  // NOTE: Windows native FOLDER dialogs (FOS_PICKFOLDERS) hide video files
-  // while picking — the folder looks empty even when it is full of videos.
-  // The webkitdirectory picker below SHOWS the files inside, so "Open folder"
-  // prefers it: you SEE the videos, pick the folder, and they queue.
+  // The directory picker lets users choose a whole folder in one step.
+  // Keep the native folder-dialog fallback for environments without it.
   function announceQueue(urls) {
     if (urls && urls.length > 1) toast(`Queued ${urls.length} videos — advancing automatically. ⏮ ⏭ / N / P to skip.`, 3500);
   }
@@ -426,62 +515,59 @@
     }
     fileInput.click();
   }
-  async function openFolderPicker(e) {
-    // Shift+click forces the native dialog (HTTP streaming, best for GB-size
-    // files). Normal click uses the directory picker that SHOWS videos.
-    const wantNative = !!(e && e.shiftKey);
-    if (!wantNative && supportsDirPick()) { try { folderInput.click(); return; } catch(err) {} }
+  async function openFolderPicker() {
+    if (supportsDirPick()) {
+      try { folderInput.click(); return; } catch(err) {}
+    }
     const api = appApi();
     if (api && api.pick_folder) {
       try {
         const r = await api.pick_folder();
-        if (r && r.urls && r.urls.length) { setPlaylist(r.urls, r.names, r.index || 0); announceQueue(r.urls); return; }
-        if (r && r.error === 'no-videos') {
-          toast(`No videos found in${r.folder ? ' ' + r.folder : ' that folder'} (subfolders included). Best: MP4 / WebM / MOV — or use “Open video(s)” to pick files directly.`, 6000);
+        if (r && r.urls && r.urls.length) {
+          setPlaylist(r.urls, r.names, r.index || 0);
+          announceQueue(r.urls);
           return;
         }
-        // Cancelled native dialog: if we skipped the visible picker (shift),
-        // fall back to it so the user still sees the files.
-        if (wantNative && supportsDirPick()) { try { folderInput.click(); } catch(err) {} }
-        return; // cancelled -> stay on black
-      } catch(err) {
-        if (supportsDirPick()) { try { folderInput.click(); } catch(err2) {} return; }
-      }
+        if (r && r.error === 'no-videos') {
+          toast('No videos found in that folder (subfolders included).', 5000);
+        }
+        return; // cancelled or no playable files
+      } catch(err) {}
     }
-    if (supportsDirPick()) folderInput.click();
-    else { fileInput.click(); toast('Folder pick not supported here — select many files instead.', 4000); }
+    fileInput.click();
+    toast('Folder picking is not supported here — select video files instead.', 4000);
   }
   openFileBtn.onclick = openFilePicker;
   openFolderBtn.onclick = openFolderPicker;
+  document.getElementById('emptyOpenFileBtn').onclick = openFilePicker;
+  document.getElementById('emptyOpenFolderBtn').onclick = openFolderPicker;
   folderInput.addEventListener('change', e => {
     if (e.target.files.length) queueFiles(Array.from(e.target.files), 'webkitRelativePath');
     folderInput.value = '';
   });
-  let autoOpened = false;
-  async function autoOpenOnce() {
-    // App launch with no video -> pop the Open dialog immediately,
-    // so the user never sits on an empty screen.
-    if (autoOpened || playlist.length) return;
-    autoOpened = true;
-    await openFilePicker();
-  }
   window.addEventListener('pywebviewready', async () => {
     try {
       const api = appApi();
       const s = api ? await api.get_startup() : null;
-      if (s && s.urls && s.urls.length) { setPlaylist(s.urls, s.names, s.index || 0); announceQueue(s.urls); return; }
-      // No startup file (normal double-click launch) -> open chooser at once.
-      setTimeout(autoOpenOnce, 400);
-    } catch(e) {}
-  });
-  // Browser fallback (no pywebview): don't auto-click (browsers block it
-  // without a gesture) — user just presses Open video(s) in the header.
-  window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-      if (!window.pywebview && !playlist.length && !autoOpened) {
-        // stay on pure black wall; header buttons are the entry point
+      // Only files explicitly passed on the command line auto-load. A normal
+      // launch stays on the ready screen until the user chooses what to open.
+      if (s && s.urls && s.urls.length) { setPlaylist(s.urls, s.names, s.index || 0); announceQueue(s.urls); }
+      if (api && api.get_pending_open) {
+        let pollingOpenRequests = false;
+        setInterval(async () => {
+          if (pollingOpenRequests) return;
+          pollingOpenRequests = true;
+          try {
+            const incoming = await api.get_pending_open();
+            if (incoming && incoming.urls && incoming.urls.length) {
+              setPlaylist(incoming.urls, incoming.names, incoming.index || 0);
+              announceQueue(incoming.urls);
+            }
+          } catch(e) {}
+          finally { pollingOpenRequests = false; }
+        }, 400);
       }
-    }, 800);
+    } catch(e) {}
   });
   // Surface silent JS failures as toasts so nothing ever "does nothing".
   window.addEventListener('error', e => {
